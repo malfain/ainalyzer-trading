@@ -4,11 +4,11 @@
  "universe": 45,
  "summary": {
   "cohorts": 3,
-  "avgTop": -0.0338,
-  "avgBottom": 0.2136,
+  "avgTop": 0.0017,
+  "avgBottom": 0.194,
   "avgAll": 0.0316,
-  "avgSpearman": -0.1244,
-  "avgHitRate": 0.2667,
+  "avgSpearman": -0.1253,
+  "avgHitRate": 0.3667,
   "topBeatAllCohorts": 0
  },
  "cohorts": [
@@ -21,9 +21,9 @@
    "n": 44,
    "yearsOfData": 1,
    "avgAll": 0.0217,
-   "avgTop": -0.0536,
-   "avgBottom": 0.2416,
-   "spearman": -0.0936,
+   "avgTop": -0.05,
+   "avgBottom": 0.1446,
+   "spearman": -0.0372,
    "hitRate": 0.3,
    "top": [
     {
@@ -57,11 +57,6 @@
      "ret": 0.1374
     },
     {
-     "t": "EMTK",
-     "score": 81,
-     "ret": -0.4522
-    },
-    {
      "t": "INKP",
      "score": 80,
      "ret": 0.2059
@@ -72,31 +67,26 @@
      "ret": 0.3698
     },
     {
-     "t": "BBRI",
+     "t": "ANTM",
+     "score": 76,
+     "ret": -0.267
+    },
+    {
+     "t": "ASII",
      "score": 75,
-     "ret": -0.0757
+     "ret": -0.2247
     }
    ],
    "bottom": [
     {
-     "t": "CPIN",
-     "score": 52,
-     "ret": 0.0497
-    },
-    {
-     "t": "ICBP",
-     "score": 48,
-     "ret": 0.0072
+     "t": "EMTK",
+     "score": 47,
+     "ret": -0.4522
     },
     {
      "t": "EXCL",
-     "score": 44,
+     "score": 36,
      "ret": 0.3988
-    },
-    {
-     "t": "ISAT",
-     "score": 44,
-     "ret": 0.483
     },
     {
      "t": "ARTO",
@@ -104,14 +94,9 @@
      "ret": -0.0329
     },
     {
-     "t": "MDKA",
-     "score": 32,
-     "ret": -0.3316
-    },
-    {
-     "t": "MBMA",
-     "score": 31,
-     "ret": -0.3478
+     "t": "BUKA",
+     "score": 29,
+     "ret": -0.4609
     },
     {
      "t": "GOTO",
@@ -119,14 +104,29 @@
      "ret": -0.3883
     },
     {
-     "t": "BRPT",
-     "score": 23,
-     "ret": 0.2048
+     "t": "MBMA",
+     "score": 27,
+     "ret": -0.3478
+    },
+    {
+     "t": "MDKA",
+     "score": 26,
+     "ret": -0.3316
+    },
+    {
+     "t": "ISAT",
+     "score": 24,
+     "ret": 0.483
     },
     {
      "t": "TPIA",
      "score": 21,
      "ret": 2.3728
+    },
+    {
+     "t": "BRPT",
+     "score": 16,
+     "ret": 0.2048
     }
    ]
   },
@@ -139,20 +139,15 @@
    "n": 45,
    "yearsOfData": 2,
    "avgAll": -0.1048,
-   "avgTop": -0.1384,
-   "avgBottom": 0.0095,
-   "spearman": -0.1223,
-   "hitRate": 0.3,
+   "avgTop": -0.1125,
+   "avgBottom": 0.0173,
+   "spearman": -0.152,
+   "hitRate": 0.5,
    "top": [
     {
      "t": "BBRI",
      "score": 91,
      "ret": -0.1849
-    },
-    {
-     "t": "JSMR",
-     "score": 90,
-     "ret": -0.1707
     },
     {
      "t": "BMRI",
@@ -166,23 +161,18 @@
     },
     {
      "t": "INCO",
-     "score": 84,
+     "score": 83,
      "ret": -0.3981
     },
     {
      "t": "BBCA",
-     "score": 81,
+     "score": 79,
      "ret": -0.0602
     },
     {
-     "t": "BBNI",
-     "score": 79,
-     "ret": -0.1304
-    },
-    {
-     "t": "TLKM",
-     "score": 77,
-     "ret": -0.141
+     "t": "JSMR",
+     "score": 78,
+     "ret": -0.1707
     },
     {
      "t": "INDF",
@@ -193,38 +183,48 @@
      "t": "AKRA",
      "score": 75,
      "ret": -0.2455
+    },
+    {
+     "t": "ICBP",
+     "score": 75,
+     "ret": 0.0501
+    },
+    {
+     "t": "UNTR",
+     "score": 74,
+     "ret": -0.0628
     }
    ],
    "bottom": [
     {
-     "t": "CPIN",
-     "score": 38,
-     "ret": -0.0247
-    },
-    {
-     "t": "BRPT",
-     "score": 35,
-     "ret": -0.2438
+     "t": "ESSA",
+     "score": 41,
+     "ret": -0.2081
     },
     {
      "t": "MBMA",
-     "score": 31,
+     "score": 40,
      "ret": -0.4171
     },
     {
-     "t": "AMMN",
-     "score": 29,
-     "ret": -0.2864
+     "t": "CPIN",
+     "score": 39,
+     "ret": -0.0247
     },
     {
      "t": "BUKA",
-     "score": 28,
+     "score": 30,
      "ret": 0.1855
     },
     {
      "t": "GOTO",
-     "score": 24,
+     "score": 29,
      "ret": 0.3016
+    },
+    {
+     "t": "BRPT",
+     "score": 23,
+     "ret": -0.2438
     },
     {
      "t": "EMTK",
@@ -257,10 +257,10 @@
    "n": 45,
    "yearsOfData": 3,
    "avgAll": 0.178,
-   "avgTop": 0.0905,
-   "avgBottom": 0.3897,
-   "spearman": -0.1573,
-   "hitRate": 0.2,
+   "avgTop": 0.1677,
+   "avgBottom": 0.4201,
+   "spearman": -0.1866,
+   "hitRate": 0.3,
    "top": [
     {
      "t": "BMRI",
@@ -279,23 +279,23 @@
     },
     {
      "t": "BBCA",
-     "score": 82,
+     "score": 81,
      "ret": -0.3426
     },
     {
-     "t": "ASII",
-     "score": 80,
-     "ret": 0.2683
-    },
-    {
      "t": "JSMR",
-     "score": 79,
+     "score": 81,
      "ret": -0.2941
     },
     {
-     "t": "BRIS",
+     "t": "MEDC",
+     "score": 79,
+     "ret": 0.6746
+    },
+    {
+     "t": "TINS",
      "score": 77,
-     "ret": -0.3719
+     "ret": 2.4389
     },
     {
      "t": "BBNI",
@@ -303,31 +303,31 @@
      "ret": -0.0857
     },
     {
-     "t": "TINS",
-     "score": 75,
-     "ret": 2.4389
+     "t": "BRIS",
+     "score": 76,
+     "ret": -0.3719
     },
     {
-     "t": "INDF",
-     "score": 74,
-     "ret": -0.0974
+     "t": "ASII",
+     "score": 75,
+     "ret": 0.2683
     }
    ],
    "bottom": [
     {
-     "t": "AMMN",
-     "score": 44,
-     "ret": -0.2903
+     "t": "INKP",
+     "score": 50,
+     "ret": 0.814
     },
     {
-     "t": "BRPT",
-     "score": 40,
-     "ret": 1.4437
+     "t": "BUKA",
+     "score": 42,
+     "ret": 0.0136
     },
     {
-     "t": "MBMA",
-     "score": 40,
-     "ret": 1.2059
+     "t": "INCO",
+     "score": 38,
+     "ret": 1.7722
     },
     {
      "t": "TBIG",
@@ -335,24 +335,24 @@
      "ret": -0.1454
     },
     {
-     "t": "INCO",
-     "score": 34,
-     "ret": 1.7722
-    },
-    {
      "t": "SMGR",
      "score": 32,
      "ret": -0.2047
     },
     {
-     "t": "BUKA",
-     "score": 26,
-     "ret": 0.0136
+     "t": "BRPT",
+     "score": 29,
+     "ret": 1.4437
     },
     {
      "t": "GOTO",
-     "score": 25,
+     "score": 27,
      "ret": -0.378
+    },
+    {
+     "t": "EMTK",
+     "score": 26,
+     "ret": 0.4052
     },
     {
      "t": "MDKA",
@@ -375,25 +375,15 @@
    "n": 45,
    "yearsOfData": 4,
    "avgAll": -0.2614,
-   "avgTop": -0.2809,
-   "avgBottom": -0.3971,
-   "spearman": 0.2469,
-   "hitRate": 0.5,
+   "avgTop": -0.1981,
+   "avgBottom": -0.4604,
+   "spearman": 0.5394,
+   "hitRate": 0.7,
    "top": [
-    {
-     "t": "EMTK",
-     "score": 88,
-     "ret": -0.6368
-    },
     {
      "t": "BBCA",
      "score": 87,
      "ret": -0.1559
-    },
-    {
-     "t": "ANTM",
-     "score": 86,
-     "ret": -0.3105
     },
     {
      "t": "ICBP",
@@ -404,11 +394,6 @@
      "t": "BMRI",
      "score": 84,
      "ret": -0.1584
-    },
-    {
-     "t": "BUKA",
-     "score": 84,
-     "ret": -0.349
     },
     {
      "t": "BRIS",
@@ -422,60 +407,75 @@
     },
     {
      "t": "INDF",
-     "score": 79,
+     "score": 78,
      "ret": -0.0791
     },
     {
      "t": "UNVR",
-     "score": 77,
+     "score": 78,
      "ret": -0.109
+    },
+    {
+     "t": "BBRI",
+     "score": 76,
+     "ret": -0.0789
+    },
+    {
+     "t": "MAPI",
+     "score": 76,
+     "ret": -0.0463
+    },
+    {
+     "t": "ISAT",
+     "score": 75,
+     "ret": -0.3437
     }
    ],
    "bottom": [
-    {
-     "t": "TBIG",
-     "score": 46,
-     "ret": -0.4076
-    },
     {
      "t": "HRUM",
      "score": 41,
      "ret": -0.3131
     },
     {
-     "t": "MBMA",
-     "score": 41,
-     "ret": -0.5585
-    },
-    {
-     "t": "INCO",
-     "score": 34,
-     "ret": -0.5025
-    },
-    {
-     "t": "MEDC",
-     "score": 30,
-     "ret": -0.2057
-    },
-    {
-     "t": "AMMN",
-     "score": 29,
-     "ret": -0.2626
-    },
-    {
      "t": "GOTO",
-     "score": 27,
+     "score": 37,
      "ret": -0.5294
     },
     {
+     "t": "EMTK",
+     "score": 32,
+     "ret": -0.6368
+    },
+    {
+     "t": "AMMN",
+     "score": 31,
+     "ret": -0.2626
+    },
+    {
+     "t": "INCO",
+     "score": 31,
+     "ret": -0.5025
+    },
+    {
      "t": "SMGR",
-     "score": 27,
+     "score": 28,
      "ret": -0.3391
     },
     {
      "t": "EXCL",
      "score": 22,
      "ret": -0.4323
+    },
+    {
+     "t": "BRPT",
+     "score": 16,
+     "ret": -0.4201
+    },
+    {
+     "t": "TPIA",
+     "score": 13,
+     "ret": -0.7478
     },
     {
      "t": "MDKA",

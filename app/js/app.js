@@ -1,11 +1,11 @@
 // Robot Trading — UI mobile (WebView). Sinyal analisa saja, tidak mengeksekusi order.
 import { SYMBOL_RE, normalize, analyzeSymbol, scan as scanAll } from './data.js';
 import { $, $$, esc, act, LABEL, fmt, pct, date, clock, ago, store } from './ui/util.js';
-import { ICON } from './ui/icons.js?v=1.2.0';
-import * as F from './fundamental.js?v=1.2.0';
-import BT from './fundamental_backtest.js?v=1.2.0';
+import { ICON } from './ui/icons.js?v=1.2.1';
+import * as F from './fundamental.js?v=1.2.1';
+import BT from './fundamental_backtest.js?v=1.2.1';
 
-const VERSION = '1.2.0';
+const VERSION = '1.2.1';
 const MAX_WATCHLIST = 100;
 const K = { watchlist: 'rt.watchlist.v1', settings: 'rt.settings.v1', scan: 'rt.scan.v1' };
 
@@ -699,12 +699,13 @@ function methodHTML() {
   return `
     <p>Skor = <b>Kualitas 35%</b> + <b>Pertumbuhan 25%</b> + <b>Valuasi 25%</b> + <b>Keamanan 15%</b>. Tiap komponen dinilai 0–100 dengan garis lurus di antara dua ambang (di bawah ambang bawah = 0, di atas ambang atas = 100).</p>
     <ul>
-      <li><b>Kualitas</b>: ROE (laba ÷ rata-rata ekuitas) 0%→20%, margin laba bersih 0%→20%, arus kas operasi ÷ laba 0,5→1,2x (laba didukung uang kas?). Bank: ROE 0%→20% dan ROA 0%→2,5%.</li>
-      <li><b>Pertumbuhan</b>: pertumbuhan pendapatan per tahun -5%→15%, pertumbuhan laba per tahun -10%→20% (masih rugi = 0, dari rugi jadi laba = 70), dan berapa tahun laba naik.</li>
-      <li><b>Valuasi</b>: PER 30x→8x (makin murah makin tinggi), PBV 5x→1x, PEG (PER ÷ pertumbuhan laba) 2,5→0,5. Perusahaan rugi: PER & PEG = 0. Ambang dipilih di sekitar sebaran saham besar IDX (PER umumnya 8–20x).</li>
+      <li><b>Kualitas</b>: ROE (laba inti ÷ rata-rata ekuitas) 0%→20%, margin laba inti 0%→20%, arus kas operasi ÷ laba inti 0,5→1,2x (laba didukung uang kas?). Ekuitas negatif/sangat kecil: ROE tidak dipakai, diganti ROA 0%→10%. ROE sangat tinggi (mis. UNVR) tetap dinilai maksimal 100. Bank: ROE 0%→20% dan ROA 0%→2,5%.</li>
+      <li><b>Pertumbuhan</b>: pertumbuhan pendapatan per tahun -5%→15%, pertumbuhan laba inti per tahun -10%→20% (masih rugi = 0, dari rugi/basis sangat kecil jadi laba = "turnaround", dibatasi 70), dan berapa tahun laba naik. Tahun yang tidak sebanding (tahun hilang, atau ada operasi dihentikan/dipisah seperti ADRO 2022→2023) dilewati, bukan dihitung sebagai penurunan.</li>
+      <li><b>Valuasi</b>: PER 30x→8x (makin murah makin tinggi), PBV 5x→1x, PEG (PER ÷ pertumbuhan laba inti) 2,5→0,5 — hanya bila laba tumbuh ≥ 3%/thn, selain itu nilai rendah. PER memakai laba inti. Perusahaan rugi: PER & PEG = 0. Ambang dipilih di sekitar sebaran saham besar IDX (PER umumnya 8–20x).</li>
       <li><b>Keamanan</b>: utang ÷ ekuitas (DER) 2x→0,3x dan berapa tahun laba positif. Bank: DER tidak dipakai (utang bank = dana nasabah); diganti modal ÷ aset 8%→16%.</li>
     </ul>
-    <p>PER memakai laba 12 bulan terakhir (TTM) bila tersedia, kalau tidak laba tahunan terakhir. Laporan dalam USD (mis. ADRO, ITMG, INCO, AMMN) dikonversi ke rupiah dengan kurs USD/IDR terkini. Komponen tanpa data dilewati; sub-skor tanpa data sama sekali diberi 50 (netral).</p>
+    <p><b>Laba inti</b>: laba bersih bisa naik-turun karena pos sekali waktu (laba jual anak usaha, impairment) atau operasi yang dihentikan. Kami pakai: laba dari operasi berlanjut − pos tak biasa (data Yahoo). Angka "normalized income" Yahoo hanya dipakai kalau tandanya sama dan selisihnya wajar (≤ 50% pos tak biasa + 5% laba); kalau tidak (mis. GOTO 2023), dipakai hitungan kami sendiri. Khusus bank, pos "tak biasa" positif yang muncul tiap tahun (pemulihan kredit) dianggap rutin. Pertumbuhan &gt;200%, ekuitas kecil, tahun hilang, perubahan jumlah saham besar, dan laporan USD diberi tanda ⚠/catatan.</p>
+    <p>PER memakai laba inti 12 bulan terakhir (TTM) bila tersedia, kalau tidak laba tahunan terakhir. Laporan dalam USD (mis. ADRO, ITMG, INCO, AMMN) dikonversi ke rupiah dengan kurs USD/IDR terkini. Komponen tanpa data dilewati; sub-skor tanpa data sama sekali diberi 50 (netral).</p>
     <p><b>Label:</b> ≥75 Fundamental kuat · 60–74 Cukup baik · 45–59 Biasa · &lt;45 Lemah.</p>`;
 }
 
@@ -760,7 +761,7 @@ function renderFund() {
     return `<div class="row frow" role="button" tabindex="0" data-s="${t}" data-m="saham" aria-label="Peringkat ${i + 1}, ${t}, skor ${esc(r.score)}, ${esc(r.band && r.band.label)}">
       <span class="frank mono">${i + 1}</span>
       ${avatar(r.ticker)}
-      <div class="row-main"><div class="row-t"><span class="sym">${t}</span><span class="mk sec">${esc(r.sector)}</span></div><div class="row-s">${esc(r.reason)}</div></div>
+      <div class="row-main"><div class="row-t"><span class="sym">${t}</span><span class="mk sec">${esc(r.sector)}</span>${warnChip(r)}</div><div class="row-s">${esc(r.reason)}</div></div>
       <div class="row-r"><span class="fscore ${bc}">${esc(val)}</span><span class="fband">${f.sort === 'score' ? esc(r.band && r.band.label) : esc((FSORTS.find(s => s.v === f.sort) || {}).name)}</span></div></div>`;
   };
   const errRow = r => `<div class="row frow" role="button" tabindex="0" data-s="${esc(r.ticker)}" data-m="saham" aria-label="${esc(r.ticker)}, gagal dimuat">
@@ -823,27 +824,51 @@ function big(v) {
   return x.toLocaleString('id-ID', { maximumFractionDigits: Math.abs(x) >= 100 ? 0 : Math.abs(x) >= 10 ? 1 : 2 }) + u;
 }
 
-function miniBars(years, key, title, color) {
-  const vals = years.map(y => y[key]);
-  if (!vals.some(v => v != null)) return '';
+// Bar per tahun. key = seri utama (padat, berlabel); ghost = seri pembanding (garis tepi, mis. laba dilaporkan).
+function miniBars(years, key, title, color, ghost = null) {
+  const vals = years.flatMap(y => [y[key], ghost ? y[ghost] : null]).filter(v => v != null && Number.isFinite(v));
+  if (!vals.length) return '';
   const W = 160, H = 96, top = 14, bot = 16, plot = H - top - bot;
-  const max = Math.max(0, ...vals.filter(v => v != null)), min = Math.min(0, ...vals.filter(v => v != null));
+  const max = Math.max(0, ...vals), min = Math.min(0, ...vals);
   const span = max - min || 1;
   const y0 = top + (max / span) * plot;
-  const n = years.length, slot = W / n, bw = Math.min(26, slot * 0.55);
+  const n = years.length, slot = W / n, bw = Math.min(ghost ? 14 : 26, slot * (ghost ? 0.36 : 0.55));
+  const rect = (v, x, solid) => {
+    const h = Math.max(1.5, Math.abs(v) / span * plot), yTop = v >= 0 ? y0 - h : y0;
+    const c = v < 0 ? 'var(--sell)' : color;
+    return [`<rect x="${x.toFixed(1)}" y="${yTop.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="3" ${solid ? `fill="${c}"` : `fill="none" stroke="${c}" stroke-width="1.2" stroke-dasharray="2 2"`}/>`, yTop];
+  };
   const bars = years.map((y, i) => {
-    const v = y[key], cx = slot * i + slot / 2;
-    const lbl = `<text x="${cx}" y="${H - 3}" text-anchor="middle" class="mb-x">${esc(String(y.fy).slice(2))}</text>`;
-    if (v == null) return lbl;
-    const h = Math.max(1.5, Math.abs(v) / span * plot);
-    const yTop = v >= 0 ? y0 - h : y0;
-    const neg = v < 0;
-    return `<rect x="${(cx - bw / 2).toFixed(1)}" y="${yTop.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="3" fill="${neg ? 'var(--sell)' : color}"><title>FY${esc(y.fy)}: ${esc(big(v))}</title></rect>
-      <text x="${cx}" y="${(neg ? y0 - 3 : yTop - 3).toFixed(1)}" text-anchor="middle" class="mb-v">${esc(big(v))}</text>${lbl}`;
+    const v = y[key], g = ghost ? y[ghost] : null, cx = slot * i + slot / 2;
+    let out = `<text x="${cx}" y="${H - 3}" text-anchor="middle" class="mb-x">${esc(String(y.fy).slice(2))}</text>`;
+    const tip = `FY${y.fy}: ${big(v)}${ghost ? ` (dilaporkan ${big(g)})` : ''}`;
+    if (g != null && Number.isFinite(g)) out += rect(g, cx - bw - 1, false)[0];
+    if (v != null && Number.isFinite(v)) {
+      const [r, yTop] = rect(v, ghost ? cx + 1 : cx - bw / 2, true);
+      const lx = ghost ? cx + 1 + bw / 2 : cx;
+      out += `<g>${r}<title>${esc(tip)}</title></g><text x="${lx.toFixed(1)}" y="${(v < 0 ? y0 - 3 : yTop - 3).toFixed(1)}" text-anchor="middle" class="mb-v">${esc(big(v))}</text>`;
+    }
+    return out;
   }).join('');
   return `<figure class="mbar"><figcaption>${esc(title)}</figcaption>
-    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title)} per tahun: ${esc(years.map(y => `FY${y.fy} ${big(y[key])}`).join(', '))}">
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title)} per tahun: ${esc(years.map(y => `FY${y.fy} ${big(y[key])}${ghost ? ` (dilaporkan ${big(y[ghost])})` : ''}`).join(', '))}">
       <line x1="0" x2="${W}" y1="${y0.toFixed(1)}" y2="${y0.toFixed(1)}" stroke="rgba(255,255,255,.14)"/>${bars}</svg></figure>`;
+}
+
+// chip ⚠ + daftar peringatan data (flags dari fundamental.js)
+const warnFlags = r => ((r && r.metrics && r.metrics.flags) || []).filter(f => f.level === 'warn');
+function warnChip(r) {
+  const w = warnFlags(r);
+  if (!w.length) return '';
+  const txt = w.map(f => f.text).join(' ');
+  return `<span class="fwarn" title="${esc(txt)}" aria-label="Peringatan data: ${esc(txt)}">⚠${w.length > 1 ? esc(w.length) : ''}</span>`;
+}
+
+function flagsHTML(m) {
+  const fl = (m && m.flags) || [];
+  if (!fl.length) return '';
+  return `<details class="fflags"${fl.some(f => f.level === 'warn') ? ' open' : ''}><summary>${fl.some(f => f.level === 'warn') ? '⚠ ' : ''}Catatan data (${esc(fl.length)}) ${ICON.down}</summary>
+    <ul>${fl.map(f => `<li class="${f.level === 'warn' ? 'w' : ''}">${esc(f.text)}</li>`).join('')}</ul></details>`;
 }
 
 function fundCardHTML() {
@@ -878,10 +903,13 @@ function fundCardHTML() {
         <div class="fund-band ${bc}-t">${esc(r.band && r.band.label)}</div></div>
       <div class="fund-ring ${bc}" style="--p:${Math.max(0, Math.min(100, Number(r.score) || 0))}" aria-hidden="true"><span>${esc(r.sector)}</span></div>
     </div>
-    <p class="fund-reason">${esc(r.reason)}</p>
+    <p class="fund-reason">${esc(r.reason)} ${warnChip(r)}</p>
     <div class="fsubs">${subs}</div>
     <div class="kv-grid" style="margin-top:14px">${kv}</div>
-    ${years.length ? `<div class="mbars">${miniBars(years, 'rev', `Pendapatan (${m.currency || ''})`, 'var(--blue)')}${miniBars(years, 'ni', `Laba bersih (${m.currency || ''})`, 'var(--buy)')}</div>` : ''}
+    ${years.length ? `<div class="mbars">${miniBars(years, 'rev', `Pendapatan (${m.currency || ''})`, 'var(--blue)')}${miniBars(years, 'core', `Laba inti (${m.currency || ''})`, 'var(--buy)', 'ni')}</div>
+      <p class="note mb-legend"><span><i class="lg-solid"></i> Laba inti (tanpa pos sekali waktu)</span><span><i class="lg-ghost"></i> Laba bersih (dilaporkan)</span></p>` : ''}
+    <p class="note">Laba inti = laba dari usaha yang berlanjut, tanpa pos sekali waktu (jual aset/anak usaha, impairment, dll.). Semua rasio & skor memakai laba inti.</p>
+    ${flagsHTML(m)}
     <p class="note">Data: laporan keuangan tahunan s/d FY${esc(m.fy)} (Yahoo Finance)${m.ttm ? `, laba 12 bln s/d ${esc(m.ttmDate)} untuk PER` : ''}. Harga ${esc(fmt(m.price, r.priceCurrency))}.${curNote}${missNote}</p>
     ${a ? `<div class="fund-tech"><span>Sinyal teknikal saat ini:</span><span class="badge ${a}">${a}</span><span class="muted">${esc(LABEL[a])} · ${esc(ivName(state.data.interval))}</span></div>
       <p class="note" style="margin-top:6px">Fundamental = pilih saham apa. Teknikal = kapan beli/jual.</p>` : ''}
