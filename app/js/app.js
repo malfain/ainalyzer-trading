@@ -1,9 +1,11 @@
 // Robot Trading — UI mobile (WebView). Sinyal analisa saja, tidak mengeksekusi order.
 import { SYMBOL_RE, normalize, analyzeSymbol, scan as scanAll } from './data.js';
 import { $, $$, esc, act, LABEL, fmt, pct, date, clock, ago, store } from './ui/util.js';
-import { ICON } from './ui/icons.js?v=1.1.0';
+import { ICON } from './ui/icons.js?v=1.2.0';
+import * as F from './fundamental.js?v=1.2.0';
+import BT from './fundamental_backtest.js?v=1.2.0';
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const MAX_WATCHLIST = 100;
 const K = { watchlist: 'rt.watchlist.v1', settings: 'rt.settings.v1', scan: 'rt.scan.v1' };
 
@@ -88,6 +90,9 @@ const state = {
   chartInterval: null,
   data: null, dataAt: 0, detailError: null, detailLoading: false, selSeq: 0,
   showAllTrades: false,
+  mktView: 'watch',      // 'watch' | 'fund' (segmen di tab Pasar)
+  fund: { rows: new Map(), loading: false, done: 0, total: 0, seq: 0, filter: 'all', sort: 'score' },
+  fundCur: { key: null, data: null, error: null, loading: false, seq: 0 }, // kartu Fundamental di tab Chart
 };
 const optsOf = () => ({ strategy: state.settings.strategy, atr_stop: state.settings.atr_stop, ...(state.settings.ma200 ? { ma200: true } : {}) });
 const sigOf = () => `${state.settings.interval}|${state.settings.strategy}|${state.settings.atr_stop}|${state.settings.ma200 ? 'ma200' : ''}`;
@@ -147,7 +152,7 @@ function showTab(tab) {
   const prev = state.tab;
   state.tab = tab;
   document.body.dataset.tab = tab;
-  $('#greet').textContent = tab === 'market' ? 'Daftar pantau' : tab === 'more' ? 'Pengaturan & bantuan' : greeting() + '!';
+  $('#greet').textContent = tab === 'market' ? (state.mktView === 'fund' ? 'Peringkat fundamental' : 'Daftar pantau') : tab === 'more' ? 'Pengaturan & bantuan' : greeting() + '!';
   for (const v of $$('.view')) v.hidden = v.dataset.tab !== tab;
   for (const b of $$('.tab')) {
     if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
@@ -457,6 +462,10 @@ $('#view-signal').addEventListener('click', e => {
 function renderMarketShell() {
   $('#view-market').innerHTML = `
     <h1 class="page-h">Pasar</h1>
+    <div class="seg mview" role="group" aria-label="Tampilan pasar" id="mktView">
+      <button type="button" data-v="watch">Daftar Pantau</button><button type="button" data-v="fund">Peringkat Fundamental</button>
+    </div>
+    <div id="mktWatch">
     <div class="toolbar">
       <div class="seg" role="group" aria-label="Filter pasar" id="mktFilter">
         <button type="button" data-f="all">Semua</button><button type="button" data-f="saham">Saham</button><button type="button" data-f="crypto">Crypto</button>
@@ -479,10 +488,16 @@ function renderMarketShell() {
       <div class="form-err" id="addErr" role="alert" hidden></div>
       <p class="note" style="margin-bottom:0">Saham IDX cukup 4 huruf (BBCA). Crypto cukup kodenya (BTC → BTCUSDT).</p>
     </form>
-    </div>`;
+    </div>
+    </div>
+    <div id="mktFund" hidden>${fundShellHTML()}</div>`;
 }
 
 function renderMarket() {
+  for (const b of $$('#mktView button')) b.setAttribute('aria-pressed', String(b.dataset.v === state.mktView));
+  $('#mktWatch').hidden = state.mktView !== 'watch';
+  $('#mktFund').hidden = state.mktView !== 'fund';
+  if (state.mktView === 'fund') return renderFund();
   for (const b of $$('#mktFilter button')) b.setAttribute('aria-pressed', String(b.dataset.f === state.filter));
   for (const b of $$('#addMkt button')) b.setAttribute('aria-pressed', String(b.dataset.m === state.addMarket));
   const eb = $('#editBtn');
@@ -500,6 +515,14 @@ function renderMarket() {
 const mv = $('#view-market');
 mv.addEventListener('click', e => {
   if (suppressClick) { suppressClick = false; return; }
+  const mvb = e.target.closest('#mktView [data-v]');
+  if (mvb) {
+    if (mvb.dataset.v === state.mktView) return;
+    state.mktView = mvb.dataset.v === 'fund' ? 'fund' : 'watch';
+    $('#greet').textContent = state.mktView === 'fund' ? 'Peringkat fundamental' : 'Daftar pantau';
+    return renderMarket();
+  }
+  if (state.mktView === 'fund') return fundClick(e);
   const f = e.target.closest('#mktFilter [data-f]');
   if (f) { state.filter = f.dataset.f; return renderMarket(); }
   const m = e.target.closest('#addMkt [data-m]');
@@ -580,6 +603,292 @@ document.addEventListener('keydown', e => {
     e.preventDefault(); e.target.click();
   }
 });
+
+// ---------------------------------------------------------------- fundamental (laporan keuangan)
+const SUBS = [
+  { k: 'quality', name: 'Kualitas', w: '35%' },
+  { k: 'growth', name: 'Pertumbuhan', w: '25%' },
+  { k: 'value', name: 'Valuasi', w: '25%' },
+  { k: 'safety', name: 'Keamanan', w: '15%' },
+];
+const FSORTS = [{ v: 'score', name: 'Skor' }, ...SUBS.map(s => ({ v: s.k, name: s.name }))];
+const pctTxt = (v, d = 1) => (v == null ? '–' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(d).replace('.', ',')}%`);
+
+// 45 saham besar + saham (IDX) di daftar pantau, kode tanpa .JK
+function fundUniverse() {
+  const out = [...F.UNIVERSE];
+  for (const w of state.watchlist) {
+    if (w.market !== 'saham') continue;
+    const t = F.tickerOf(canon(w.symbol, 'saham'));
+    if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
+function fundShellHTML() {
+  return `
+    <div class="hero plain fund-hero">
+      <div class="hero-top"><div class="hero-k">Peringkat Fundamental</div><button type="button" class="link" data-fq="reload">${ICON.refresh}Muat ulang</button></div>
+      <p class="note" style="margin-top:6px">Skor 0–100 dari laporan keuangan tahunan: kualitas laba, pertumbuhan, valuasi, dan keamanan utang. 45 saham besar (mirip LQ45, bukan daftar resmi) + saham di daftar pantau Anda.</p>
+      <div id="fundHead"></div>
+    </div>
+    <div class="fund-warn"><b>Bukan ramalan harga.</b> Skor menilai kesehatan perusahaan, bukan memastikan sahamnya naik setahun ke depan. ${esc(btOneLiner())}</div>
+    <div class="toolbar" style="margin-top:14px">
+      <div class="seg" role="group" aria-label="Filter sektor" id="fundFilter">
+        <button type="button" data-ff="all">Semua</button><button type="button" data-ff="bank">Bank</button><button type="button" data-ff="nonbank">Non-bank</button>
+      </div>
+    </div>
+    <div class="fchips" role="group" aria-label="Urutkan menurut" id="fundSort">
+      <span class="fchips-l">Urut:</span>${FSORTS.map(s => `<button type="button" data-fs="${s.v}">${esc(s.name)}</button>`).join('')}
+    </div>
+    <div class="panel" style="margin-top:12px">
+      <div class="grab" aria-hidden="true"></div>
+      <div id="fundList"></div>
+    </div>
+    <div class="group" style="margin-top:12px">
+      <details class="acc"><summary>Seberapa bisa dipercaya? ${ICON.down}</summary><div class="acc-b">${btHTML()}</div></details>
+      <details class="acc"><summary>Cara menghitung skor ${ICON.down}</summary><div class="acc-b">${methodHTML()}</div></details>
+    </div>
+    <p class="note" style="text-align:center;padding:0 8px">Data laporan keuangan: Yahoo Finance (tahunan, ±4 tahun terakhir). Bukan saran investasi.</p>`;
+}
+
+function btOneLiner() {
+  const s = BT && BT.summary;
+  if (!s || !s.cohorts) return '';
+  const beat = s.avgTop > s.avgAll;
+  const full = (BT.cohorts || []).filter(c => !c.partial);
+  const span = full.length ? ` (${full[0].entry.slice(0, 4)}–${full[full.length - 1].exit.slice(0, 4)})` : '';
+  return `Uji historis ${s.cohorts} tahun${span}: 10 saham skor tertinggi rata-rata ${pctTxt(s.avgTop)}/thn vs semua ${pctTxt(s.avgAll)} — ${beat ? 'sedikit lebih baik, tapi sampelnya kecil' : 'justru KALAH dari rata-rata'}.`;
+}
+
+const mon = d => new Date(d + 'T00:00:00Z').toLocaleDateString('id-ID', { month: 'short', year: '2-digit', timeZone: 'UTC' });
+function btHTML() {
+  if (!BT || !Array.isArray(BT.cohorts)) return '<p>Hasil uji historis belum tersedia.</p>';
+  const s = BT.summary || {};
+  const rows = BT.cohorts.map(c => `
+    <div class="tr bt${c.partial ? ' partial' : ''}" role="row">
+      <span role="cell"><b>FY${esc(c.fy)}</b><small>${esc(mon(c.entry))} → ${esc(mon(c.exit))}${c.partial ? ` · berjalan ${esc(c.months)} bln` : ''}</small></span>
+      <span role="cell" class="mono">${pctTxt(c.avgTop)}</span>
+      <span role="cell" class="mono">${pctTxt(c.avgBottom)}</span>
+      <span role="cell" class="mono">${pctTxt(c.avgAll)}</span>
+      <span role="cell" class="mono">${c.spearman == null ? '–' : esc(c.spearman.toFixed(2).replace('.', ','))}</span>
+    </div>`).join('');
+  const verdict = s.avgSpearman != null && s.avgSpearman > 0.1 && s.avgTop > s.avgAll
+    ? 'Ada sedikit hubungan positif antara skor dan kenaikan harga, tapi sampelnya terlalu kecil untuk diandalkan.'
+    : 'Di periode ini skor fundamental <b>tidak</b> berhasil memilih saham yang naik lebih tinggi — saham berskor tinggi rata-rata malah kalah dari saham berskor rendah. Harga saham juga digerakkan harga komoditas, suku bunga, sentimen, dan ekspektasi yang belum tercermin di laporan.';
+  return `
+    <p>Kami menguji skor ini ke belakang: untuk tiap tahun buku, skor dihitung <b>hanya</b> dari laporan s/d tahun itu, lalu saham "dibeli" ±1 Mei tahun berikutnya (saat laporan tahunan sudah terbit) dan dilihat hasil harganya 12 bulan kemudian.</p>
+    <div class="ttable" role="table" aria-label="Hasil uji historis skor fundamental">
+      <div class="tr bt th" role="row"><span role="columnheader">Kohort</span><span role="columnheader">Top 10</span><span role="columnheader">Bawah 10</span><span role="columnheader">Semua</span><span role="columnheader">Korelasi</span></div>
+      ${rows}
+    </div>
+    <p style="margin-top:10px"><b>Rata-rata ${esc(s.cohorts)} kohort penuh:</b> top 10 ${pctTxt(s.avgTop)}, bawah 10 ${pctTxt(s.avgBottom)}, semua ${pctTxt(s.avgAll)}. Korelasi peringkat skor ↔ return ${s.avgSpearman == null ? '–' : esc(s.avgSpearman.toFixed(2).replace('.', ','))} (1 = sempurna, 0 = tidak ada hubungan, negatif = berlawanan). Top 10 mengalahkan rata-rata semua saham di ${esc(s.topBeatAllCohorts)} dari ${esc(s.cohorts)} kohort; rata-rata ${esc(Math.round((s.avgHitRate || 0) * 100))}% saham top 10 naik lebih tinggi dari rata-rata.</p>
+    <p>${verdict}</p>
+    <p><b>Keterbatasan:</b></p>
+    <ul>
+      <li>Hanya ${esc(s.cohorts)} kohort tahunan dan ±45 saham — sampel sangat kecil, hasil bisa kebetulan.</li>
+      <li>Return hanya dari harga, <b>belum termasuk dividen</b> (saham bank & batu bara membagi dividen besar).</li>
+      <li>Daftar saham adalah daftar besar <b>hari ini</b> (bias survivorship): saham yang dulu besar lalu jatuh tidak ikut diuji.</li>
+      <li>Yahoo hanya memberi ±4 tahun laporan, jadi kohort FY2022 dinilai tanpa data pertumbuhan; angka lama bisa sudah direvisi.</li>
+      <li>Kohort berjalan (belum 12 bulan) tidak dihitung dalam rata-rata.</li>
+    </ul>
+    <p class="note">Dihitung ${esc(BT.generated)} oleh tests_js/fundamental_backtest.mjs.</p>`;
+}
+
+function methodHTML() {
+  return `
+    <p>Skor = <b>Kualitas 35%</b> + <b>Pertumbuhan 25%</b> + <b>Valuasi 25%</b> + <b>Keamanan 15%</b>. Tiap komponen dinilai 0–100 dengan garis lurus di antara dua ambang (di bawah ambang bawah = 0, di atas ambang atas = 100).</p>
+    <ul>
+      <li><b>Kualitas</b>: ROE (laba ÷ rata-rata ekuitas) 0%→20%, margin laba bersih 0%→20%, arus kas operasi ÷ laba 0,5→1,2x (laba didukung uang kas?). Bank: ROE 0%→20% dan ROA 0%→2,5%.</li>
+      <li><b>Pertumbuhan</b>: pertumbuhan pendapatan per tahun -5%→15%, pertumbuhan laba per tahun -10%→20% (masih rugi = 0, dari rugi jadi laba = 70), dan berapa tahun laba naik.</li>
+      <li><b>Valuasi</b>: PER 30x→8x (makin murah makin tinggi), PBV 5x→1x, PEG (PER ÷ pertumbuhan laba) 2,5→0,5. Perusahaan rugi: PER & PEG = 0. Ambang dipilih di sekitar sebaran saham besar IDX (PER umumnya 8–20x).</li>
+      <li><b>Keamanan</b>: utang ÷ ekuitas (DER) 2x→0,3x dan berapa tahun laba positif. Bank: DER tidak dipakai (utang bank = dana nasabah); diganti modal ÷ aset 8%→16%.</li>
+    </ul>
+    <p>PER memakai laba 12 bulan terakhir (TTM) bila tersedia, kalau tidak laba tahunan terakhir. Laporan dalam USD (mis. ADRO, ITMG, INCO, AMMN) dikonversi ke rupiah dengan kurs USD/IDR terkini. Komponen tanpa data dilewati; sub-skor tanpa data sama sekali diberi 50 (netral).</p>
+    <p><b>Label:</b> ≥75 Fundamental kuat · 60–74 Cukup baik · 45–59 Biasa · &lt;45 Lemah.</p>`;
+}
+
+const bandCls = key => ({ strong: 'f-strong', good: 'f-good', avg: 'f-avg', weak: 'f-weak' }[key] || 'f-avg');
+
+function startFund(fresh = false) {
+  const f = state.fund;
+  const list = fundUniverse();
+  const seq = ++f.seq;
+  if (fresh) f.rows.clear();
+  const todo = [];
+  for (const t of list) {
+    if (!fresh && f.rows.has(t) && !f.rows.get(t).error) continue;
+    const hit = fresh ? null : F.cachedFundamental(t);
+    if (hit) f.rows.set(t, hit); else todo.push(t);
+  }
+  f.total = list.length;
+  f.done = list.length - todo.length;
+  if (!todo.length) { f.loading = false; return; }
+  f.loading = true;
+  F.loadMany(todo, (t, res, err) => {
+    if (seq !== f.seq) return;
+    f.rows.set(t, res || { ticker: t, error: err || 'Gagal memuat.' });
+    f.done++;
+    scheduleRender();
+  }, { concurrency: 4, fresh }).finally(() => {
+    if (seq !== f.seq) return;
+    f.loading = false;
+    scheduleRender();
+  });
+}
+
+function renderFund() {
+  const f = state.fund;
+  const list = fundUniverse();
+  if (!f.loading && list.some(t => !f.rows.has(t))) startFund();
+  for (const b of $$('#fundFilter button')) b.setAttribute('aria-pressed', String(b.dataset.ff === f.filter));
+  for (const b of $$('#fundSort button')) b.setAttribute('aria-pressed', String(b.dataset.fs === f.sort));
+  const rows = list.map(t => f.rows.get(t)).filter(Boolean);
+  const ok = rows.filter(r => !r.error), errs = rows.filter(r => r.error);
+  $('#fundHead').innerHTML = f.loading
+    ? `<div class="fund-prog"><span class="scan-txt">Memuat laporan keuangan <b class="mono">${f.done}/${f.total}</b></span></div>
+       <div class="progress" aria-hidden="true"><i style="width:${f.total ? Math.round(f.done / f.total * 100) : 0}%"></i></div>`
+    : `<div class="fund-prog">${ok.length} saham dinilai${errs.length ? ` · <span class="neg">${errs.length} gagal</span>` : ''}${ok.length ? ` · data ${esc(clock(Math.min(...ok.map(r => r.at))))}, disimpan 24 jam` : ''}</div>`;
+  const byFilter = r => f.filter === 'all' || (f.filter === 'bank' ? r.bank : !r.bank);
+  const key = r => (f.sort === 'score' ? r.score : (r.sub || {})[f.sort]) ?? -1;
+  const shown = ok.filter(byFilter).sort((a, b) => key(b) - key(a) || b.score - a.score || a.ticker.localeCompare(b.ticker));
+  const shownErr = errs.filter(r => f.filter === 'all' || (f.filter === 'bank' ? F.isBank(r.ticker) : !F.isBank(r.ticker)));
+  const pending = f.loading ? list.filter(t => !f.rows.has(t)).filter(t => f.filter === 'all' || (f.filter === 'bank' ? F.isBank(t) : !F.isBank(t))) : [];
+  const row = (r, i) => {
+    const t = esc(r.ticker), bc = bandCls(r.band && r.band.key);
+    const val = f.sort === 'score' ? r.score : (r.sub || {})[f.sort];
+    return `<div class="row frow" role="button" tabindex="0" data-s="${t}" data-m="saham" aria-label="Peringkat ${i + 1}, ${t}, skor ${esc(r.score)}, ${esc(r.band && r.band.label)}">
+      <span class="frank mono">${i + 1}</span>
+      ${avatar(r.ticker)}
+      <div class="row-main"><div class="row-t"><span class="sym">${t}</span><span class="mk sec">${esc(r.sector)}</span></div><div class="row-s">${esc(r.reason)}</div></div>
+      <div class="row-r"><span class="fscore ${bc}">${esc(val)}</span><span class="fband">${f.sort === 'score' ? esc(r.band && r.band.label) : esc((FSORTS.find(s => s.v === f.sort) || {}).name)}</span></div></div>`;
+  };
+  const errRow = r => `<div class="row frow" role="button" tabindex="0" data-s="${esc(r.ticker)}" data-m="saham" aria-label="${esc(r.ticker)}, gagal dimuat">
+      <span class="frank mono">–</span>${avatar(r.ticker)}
+      <div class="row-main"><div class="row-t"><span class="sym">${esc(r.ticker)}</span><span class="mk sec">${esc(F.sectorOf(r.ticker))}</span></div><div class="row-s neg">${esc(r.error)}</div></div>
+      <div class="row-r"><span class="badge ERR">ERROR</span></div></div>`;
+  const skel = t => `<div class="row frow"><span class="frank mono">·</span>${avatar(t)}<div class="row-main"><div class="row-t"><span class="sym">${esc(t)}</span></div><div class="row-s"><span class="skel" style="width:150px"></span></div></div><div class="row-r"><span class="badge LOAD">···</span></div></div>`;
+  $('#fundList').innerHTML = shown.length || shownErr.length || pending.length
+    ? `<div class="list">${shown.map(row).join('')}${pending.slice(0, 6).map(skel).join('')}${shownErr.map(errRow).join('')}</div>
+       ${pending.length > 6 ? `<p class="note" style="text-align:center">+${pending.length - 6} saham lagi sedang dimuat…</p>` : ''}`
+    : '<div class="empty"><b>Belum ada data</b>Ketuk Muat ulang untuk mengambil laporan keuangan.</div>';
+}
+
+function fundClick(e) {
+  const f = state.fund;
+  const ff = e.target.closest('[data-ff]');
+  if (ff) { f.filter = ff.dataset.ff; return renderFund(); }
+  const fs = e.target.closest('[data-fs]');
+  if (fs) { f.sort = FSORTS.some(s => s.v === fs.dataset.fs) ? fs.dataset.fs : 'score'; return renderFund(); }
+  if (e.target.closest('[data-fq="reload"]')) { startFund(true); return renderFund(); }
+  const row = e.target.closest('.frow[data-s]');
+  if (row) openSymbol(row.dataset.s, 'saham');
+}
+
+// ---- kartu Fundamental di tab Chart (saham saja)
+function ensureFundCur(symbol, fresh = false) {
+  const fc = state.fundCur;
+  const key = F.yahooSym(canon(symbol, 'saham'));
+  if (fc.key === key && (fc.data || fc.loading || fc.error)) return;
+  const seq = ++fc.seq;
+  fc.key = key; fc.error = null;
+  fc.data = fresh ? null : F.cachedFundamental(key);
+  if (fc.data) return paintFundCard();
+  fc.loading = true;
+  paintFundCard();
+  F.loadFundamental(key, { fresh }).then(r => {
+    if (seq !== fc.seq) return;
+    fc.data = r;
+    state.fund.rows.set(r.ticker, r);
+  }).catch(e => {
+    if (seq !== fc.seq) return;
+    fc.error = e && e.message ? e.message : 'Gagal memuat laporan keuangan.';
+  }).finally(() => {
+    if (seq !== fc.seq) return;
+    fc.loading = false;
+    paintFundCard();
+  });
+}
+function paintFundCard() {
+  const el = $('#fundCard');
+  if (el && state.tab === 'chart') el.innerHTML = fundCardHTML();
+}
+
+// angka besar ringkas: 1,2 T (triliun), 450 M (miliar), 12 jt
+function big(v) {
+  if (v == null || !Number.isFinite(v)) return '–';
+  const a = Math.abs(v);
+  const [d, u] = a >= 1e12 ? [1e12, ' T'] : a >= 1e9 ? [1e9, ' M'] : a >= 1e6 ? [1e6, ' jt'] : [1, ''];
+  const x = v / d;
+  return x.toLocaleString('id-ID', { maximumFractionDigits: Math.abs(x) >= 100 ? 0 : Math.abs(x) >= 10 ? 1 : 2 }) + u;
+}
+
+function miniBars(years, key, title, color) {
+  const vals = years.map(y => y[key]);
+  if (!vals.some(v => v != null)) return '';
+  const W = 160, H = 96, top = 14, bot = 16, plot = H - top - bot;
+  const max = Math.max(0, ...vals.filter(v => v != null)), min = Math.min(0, ...vals.filter(v => v != null));
+  const span = max - min || 1;
+  const y0 = top + (max / span) * plot;
+  const n = years.length, slot = W / n, bw = Math.min(26, slot * 0.55);
+  const bars = years.map((y, i) => {
+    const v = y[key], cx = slot * i + slot / 2;
+    const lbl = `<text x="${cx}" y="${H - 3}" text-anchor="middle" class="mb-x">${esc(String(y.fy).slice(2))}</text>`;
+    if (v == null) return lbl;
+    const h = Math.max(1.5, Math.abs(v) / span * plot);
+    const yTop = v >= 0 ? y0 - h : y0;
+    const neg = v < 0;
+    return `<rect x="${(cx - bw / 2).toFixed(1)}" y="${yTop.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="3" fill="${neg ? 'var(--sell)' : color}"><title>FY${esc(y.fy)}: ${esc(big(v))}</title></rect>
+      <text x="${cx}" y="${(neg ? y0 - 3 : yTop - 3).toFixed(1)}" text-anchor="middle" class="mb-v">${esc(big(v))}</text>${lbl}`;
+  }).join('');
+  return `<figure class="mbar"><figcaption>${esc(title)}</figcaption>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title)} per tahun: ${esc(years.map(y => `FY${y.fy} ${big(y[key])}`).join(', '))}">
+      <line x1="0" x2="${W}" y1="${y0.toFixed(1)}" y2="${y0.toFixed(1)}" stroke="rgba(255,255,255,.14)"/>${bars}</svg></figure>`;
+}
+
+function fundCardHTML() {
+  const fc = state.fundCur;
+  const same = state.current && fc.key === F.yahooSym(canon(state.current.symbol, 'saham'));
+  const r = same ? fc.data : null;
+  if (same && fc.error && !r) {
+    return `<div class="card fund"><h3>Analisa fundamental</h3><p class="note" style="margin-top:0">Data laporan keuangan tidak tersedia: ${esc(fc.error)}</p>
+      <button type="button" class="pill ghost more-trades" data-c="fundretry">${ICON.refresh}Coba lagi</button></div>`;
+  }
+  if (!r) {
+    return `<div class="card fund"><h3>Analisa fundamental</h3><span class="skel" style="width:45%;height:28px"></span><br><br>
+      <span class="skel" style="width:90%"></span><br><br><span class="skel" style="width:75%"></span></div>`;
+  }
+  const m = r.metrics || {}, bc = bandCls(r.band && r.band.key);
+  const a = state.data ? act(state.data.action) : null;
+  const subs = SUBS.map(s => {
+    const v = (r.sub || {})[s.k], miss = (r.missing || []).includes(s.k);
+    return `<div class="fsub"><span>${esc(s.name)} <small>${esc(s.w)}</small></span>
+      <div class="fsub-bar"><i class="${bc}" style="width:${Math.max(2, Math.min(100, Number(v) || 0))}%"></i></div>
+      <b class="mono">${miss ? '–' : esc(v)}</b></div>`;
+  }).join('');
+  const kv = (r.verdicts || []).map(x => `<div class="kv fkv t-${esc(x.tone)}"><div class="k">${esc(x.label)}</div><div class="v mono">${esc(x.value)}</div><div class="fv">${esc(x.verdict)}</div></div>`).join('');
+  const years = Array.isArray(m.years) ? m.years : [];
+  const curNote = m.currency && r.priceCurrency && m.currency !== r.priceCurrency
+    ? ` Laporan dalam ${esc(m.currency)}; valuasi dikonversi ke ${esc(r.priceCurrency)} (kurs ${esc(fmt(m.fx > 1 ? m.fx : m.fx ? 1 / m.fx : null, 'IDR'))}).` : '';
+  const missNote = (r.missing || []).length ? ` Sub-skor tanpa data (–) dihitung netral 50.` : '';
+  return `<div class="card fund">
+    <div class="fund-top">
+      <div><div class="sig-lbl">Analisa fundamental</div>
+        <div class="fund-big"><b class="${bc}-t">${esc(r.score)}</b><small>/100</small></div>
+        <div class="fund-band ${bc}-t">${esc(r.band && r.band.label)}</div></div>
+      <div class="fund-ring ${bc}" style="--p:${Math.max(0, Math.min(100, Number(r.score) || 0))}" aria-hidden="true"><span>${esc(r.sector)}</span></div>
+    </div>
+    <p class="fund-reason">${esc(r.reason)}</p>
+    <div class="fsubs">${subs}</div>
+    <div class="kv-grid" style="margin-top:14px">${kv}</div>
+    ${years.length ? `<div class="mbars">${miniBars(years, 'rev', `Pendapatan (${m.currency || ''})`, 'var(--blue)')}${miniBars(years, 'ni', `Laba bersih (${m.currency || ''})`, 'var(--buy)')}</div>` : ''}
+    <p class="note">Data: laporan keuangan tahunan s/d FY${esc(m.fy)} (Yahoo Finance)${m.ttm ? `, laba 12 bln s/d ${esc(m.ttmDate)} untuk PER` : ''}. Harga ${esc(fmt(m.price, r.priceCurrency))}.${curNote}${missNote}</p>
+    ${a ? `<div class="fund-tech"><span>Sinyal teknikal saat ini:</span><span class="badge ${a}">${a}</span><span class="muted">${esc(LABEL[a])} · ${esc(ivName(state.data.interval))}</span></div>
+      <p class="note" style="margin-top:6px">Fundamental = pilih saham apa. Teknikal = kapan beli/jual.</p>` : ''}
+    <p class="note">Skor menilai laporan keuangan, <b>bukan ramalan harga</b>.</p>
+    <button type="button" class="pill ghost more-trades" data-c="fundrank">Lihat peringkat & uji historisnya</button>
+  </div>`;
+}
 
 // ---------------------------------------------------------------- tab Chart
 async function loadDetail(fresh = false) {
@@ -679,6 +988,7 @@ function renderChart() {
     drawCharts(d);
     startLive(d);
   }
+  if (cur.market === 'saham') ensureFundCur(cur.symbol);
 }
 
 function detailHTML(d) {
@@ -711,6 +1021,7 @@ function detailHTML(d) {
       <p>${esc(d.advice)}</p>
       ${lastSig ? `<div class="last">Sinyal terakhir: <b>${esc(lastSig.type)}</b> ${esc(date(lastSig.time, iv))} @ <b class="mono">${fmt(lastSig.price, cur)}</b><br>${esc(lastSig.reason)}</div>` : ''}
     </div>
+    ${d.market === 'saham' ? `<div id="fundCard">${fundCardHTML()}</div>` : ''}
 
     <div class="card">
       <div class="gauge-head"><span>Kondisi pasar (skor indikator)</span><b>${score > 0 ? '+' : ''}${esc(score)}</b></div>
@@ -825,6 +1136,8 @@ $('#view-chart').addEventListener('click', e => {
   }
   if (c.dataset.c === 'switch') return openPicker();
   if (c.dataset.c === 'retry') return loadDetail(true);
+  if (c.dataset.c === 'fundretry') { state.fundCur.key = null; return ensureFundCur(state.current.symbol, true); }
+  if (c.dataset.c === 'fundrank') { state.mktView = 'fund'; return navigate('market'); }
   if (c.dataset.c === 'alltrades') {
     state.showAllTrades = true;
     const y = window.scrollY; renderChart(); window.scrollTo(0, y);
@@ -1063,13 +1376,15 @@ function renderMore() {
             <li>Untuk strategi Tren & Skor, stop ikut naik (trailing). Cek berkala dan perbarui stop loss di broker.</li>
             <li>Aplikasi ini hanya memberi sinyal — tidak membeli atau menjual apa pun.</li>
           </ul>
+          <p style="margin-top:10px"><b>Fundamental vs teknikal</b></p>
+          <p><b>Fundamental</b> (Pasar › Peringkat Fundamental, dan kartu Fundamental di Chart) membaca laporan keuangan: untung tidak, tumbuh tidak, utangnya aman tidak, harganya mahal tidak. Gunanya untuk <b>memilih saham apa</b>. <b>Teknikal</b> (sinyal BUY/SELL) membaca gerak harga untuk menentukan <b>kapan beli atau jual</b>. Skor fundamental bukan ramalan harga — hasil uji historisnya (jujur, apa adanya) ada di Peringkat Fundamental › <i>Seberapa bisa dipercaya?</i> Pakai sebagai saringan awal, lalu gabungkan dengan sinyal teknikal dan pertimbangan Anda sendiri.</p>
           <p style="margin-top:10px"><b>Turtle & Filter MA200</b></p>
           <p>Strategi <b>Turtle</b> meniru aturan Turtle Traders: BUY saat close menembus harga tertinggi 20 candle sebelumnya, SELL saat close jatuh di bawah terendah 10 candle atau kena stop loss tetap. <b>Filter MA200</b> menahan sinyal BUY selama harga di bawah rata-rata 200 candle, supaya tidak membeli saat tren besar turun (tidak berlaku untuk strategi Beli saat Koreksi, yang sudah memakai EMA200).</p>
         </div>
       </details>
       <details class="acc">
         <summary>Penafian ${ICON.down}</summary>
-        <div class="disclaimer" style="padding-top:0">AInalyzer Trading adalah alat bantu analisa teknikal, <b>bukan saran investasi</b>. Sinyal dihitung otomatis dari indikator (EMA, RSI, ATR, Bollinger) dan bisa salah. Hasil backtest masa lalu tidak menjamin hasil ke depan. Data saham dari Yahoo Finance (bisa tertunda ±15 menit), crypto dari Binance. Keputusan dan risiko sepenuhnya di tangan Anda.</div>
+        <div class="disclaimer" style="padding-top:0">AInalyzer Trading adalah alat bantu analisa teknikal & fundamental, <b>bukan saran investasi</b>. Sinyal dihitung otomatis dari indikator (EMA, RSI, ATR, Bollinger) dan bisa salah. Skor fundamental dihitung dari laporan keuangan Yahoo Finance (bisa terlambat, direvisi, atau keliru) dan tidak menjamin saham mana pun akan naik. Hasil backtest masa lalu tidak menjamin hasil ke depan. Data saham dari Yahoo Finance (bisa tertunda ±15 menit), crypto dari Binance. Keputusan dan risiko sepenuhnya di tangan Anda.</div>
       </details>
     </div>
     <div class="version">AInalyzer Trading v${VERSION} · ${state.watchlist.length} aset dipantau</div>`;

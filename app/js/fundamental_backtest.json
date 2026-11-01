@@ -1,0 +1,488 @@
+{
+ "generated": "2026-11-01",
+ "method": "Skor dari laporan tahunan s/d akhir FY (tanpa mengintip), harga masuk hari bursa pertama >= 1 Mei FY+1, return harga 12 bulan (tanpa dividen). Top/bottom 10 dari 45 saham besar.",
+ "universe": 45,
+ "summary": {
+  "cohorts": 3,
+  "avgTop": -0.0338,
+  "avgBottom": 0.2136,
+  "avgAll": 0.0316,
+  "avgSpearman": -0.1244,
+  "avgHitRate": 0.2667,
+  "topBeatAllCohorts": 0
+ },
+ "cohorts": [
+  {
+   "fy": 2022,
+   "entry": "2023-05-01",
+   "exit": "2024-05-01",
+   "partial": false,
+   "months": 12,
+   "n": 44,
+   "yearsOfData": 1,
+   "avgAll": 0.0217,
+   "avgTop": -0.0536,
+   "avgBottom": 0.2416,
+   "spearman": -0.0936,
+   "hitRate": 0.3,
+   "top": [
+    {
+     "t": "ADRO",
+     "score": 87,
+     "ret": -0.0839
+    },
+    {
+     "t": "ITMG",
+     "score": 87,
+     "ret": -0.2139
+    },
+    {
+     "t": "PTBA",
+     "score": 86,
+     "ret": -0.2513
+    },
+    {
+     "t": "HRUM",
+     "score": 85,
+     "ret": -0.0753
+    },
+    {
+     "t": "UNTR",
+     "score": 85,
+     "ret": -0.0967
+    },
+    {
+     "t": "ESSA",
+     "score": 82,
+     "ret": 0.1374
+    },
+    {
+     "t": "EMTK",
+     "score": 81,
+     "ret": -0.4522
+    },
+    {
+     "t": "INKP",
+     "score": 80,
+     "ret": 0.2059
+    },
+    {
+     "t": "MEDC",
+     "score": 78,
+     "ret": 0.3698
+    },
+    {
+     "t": "BBRI",
+     "score": 75,
+     "ret": -0.0757
+    }
+   ],
+   "bottom": [
+    {
+     "t": "CPIN",
+     "score": 52,
+     "ret": 0.0497
+    },
+    {
+     "t": "ICBP",
+     "score": 48,
+     "ret": 0.0072
+    },
+    {
+     "t": "EXCL",
+     "score": 44,
+     "ret": 0.3988
+    },
+    {
+     "t": "ISAT",
+     "score": 44,
+     "ret": 0.483
+    },
+    {
+     "t": "ARTO",
+     "score": 32,
+     "ret": -0.0329
+    },
+    {
+     "t": "MDKA",
+     "score": 32,
+     "ret": -0.3316
+    },
+    {
+     "t": "MBMA",
+     "score": 31,
+     "ret": -0.3478
+    },
+    {
+     "t": "GOTO",
+     "score": 29,
+     "ret": -0.3883
+    },
+    {
+     "t": "BRPT",
+     "score": 23,
+     "ret": 0.2048
+    },
+    {
+     "t": "TPIA",
+     "score": 21,
+     "ret": 2.3728
+    }
+   ]
+  },
+  {
+   "fy": 2023,
+   "entry": "2024-05-01",
+   "exit": "2025-05-01",
+   "partial": false,
+   "months": 12,
+   "n": 45,
+   "yearsOfData": 2,
+   "avgAll": -0.1048,
+   "avgTop": -0.1384,
+   "avgBottom": 0.0095,
+   "spearman": -0.1223,
+   "hitRate": 0.3,
+   "top": [
+    {
+     "t": "BBRI",
+     "score": 91,
+     "ret": -0.1849
+    },
+    {
+     "t": "JSMR",
+     "score": 90,
+     "ret": -0.1707
+    },
+    {
+     "t": "BMRI",
+     "score": 89,
+     "ret": -0.2158
+    },
+    {
+     "t": "ASII",
+     "score": 85,
+     "ret": -0.0744
+    },
+    {
+     "t": "INCO",
+     "score": 84,
+     "ret": -0.3981
+    },
+    {
+     "t": "BBCA",
+     "score": 81,
+     "ret": -0.0602
+    },
+    {
+     "t": "BBNI",
+     "score": 79,
+     "ret": -0.1304
+    },
+    {
+     "t": "TLKM",
+     "score": 77,
+     "ret": -0.141
+    },
+    {
+     "t": "INDF",
+     "score": 76,
+     "ret": 0.2369
+    },
+    {
+     "t": "AKRA",
+     "score": 75,
+     "ret": -0.2455
+    }
+   ],
+   "bottom": [
+    {
+     "t": "CPIN",
+     "score": 38,
+     "ret": -0.0247
+    },
+    {
+     "t": "BRPT",
+     "score": 35,
+     "ret": -0.2438
+    },
+    {
+     "t": "MBMA",
+     "score": 31,
+     "ret": -0.4171
+    },
+    {
+     "t": "AMMN",
+     "score": 29,
+     "ret": -0.2864
+    },
+    {
+     "t": "BUKA",
+     "score": 28,
+     "ret": 0.1855
+    },
+    {
+     "t": "GOTO",
+     "score": 24,
+     "ret": 0.3016
+    },
+    {
+     "t": "EMTK",
+     "score": 20,
+     "ret": 0.5344
+    },
+    {
+     "t": "TINS",
+     "score": 18,
+     "ret": 0.2849
+    },
+    {
+     "t": "MDKA",
+     "score": 15,
+     "ret": -0.345
+    },
+    {
+     "t": "TPIA",
+     "score": 12,
+     "ret": 0.1054
+    }
+   ]
+  },
+  {
+   "fy": 2024,
+   "entry": "2025-05-01",
+   "exit": "2026-05-01",
+   "partial": false,
+   "months": 12,
+   "n": 45,
+   "yearsOfData": 3,
+   "avgAll": 0.178,
+   "avgTop": 0.0905,
+   "avgBottom": 0.3897,
+   "spearman": -0.1573,
+   "hitRate": 0.2,
+   "top": [
+    {
+     "t": "BMRI",
+     "score": 90,
+     "ret": -0.1089
+    },
+    {
+     "t": "ACES",
+     "score": 83,
+     "ret": -0.2846
+    },
+    {
+     "t": "BBRI",
+     "score": 83,
+     "ret": -0.2165
+    },
+    {
+     "t": "BBCA",
+     "score": 82,
+     "ret": -0.3426
+    },
+    {
+     "t": "ASII",
+     "score": 80,
+     "ret": 0.2683
+    },
+    {
+     "t": "JSMR",
+     "score": 79,
+     "ret": -0.2941
+    },
+    {
+     "t": "BRIS",
+     "score": 77,
+     "ret": -0.3719
+    },
+    {
+     "t": "BBNI",
+     "score": 76,
+     "ret": -0.0857
+    },
+    {
+     "t": "TINS",
+     "score": 75,
+     "ret": 2.4389
+    },
+    {
+     "t": "INDF",
+     "score": 74,
+     "ret": -0.0974
+    }
+   ],
+   "bottom": [
+    {
+     "t": "AMMN",
+     "score": 44,
+     "ret": -0.2903
+    },
+    {
+     "t": "BRPT",
+     "score": 40,
+     "ret": 1.4437
+    },
+    {
+     "t": "MBMA",
+     "score": 40,
+     "ret": 1.2059
+    },
+    {
+     "t": "TBIG",
+     "score": 38,
+     "ret": -0.1454
+    },
+    {
+     "t": "INCO",
+     "score": 34,
+     "ret": 1.7722
+    },
+    {
+     "t": "SMGR",
+     "score": 32,
+     "ret": -0.2047
+    },
+    {
+     "t": "BUKA",
+     "score": 26,
+     "ret": 0.0136
+    },
+    {
+     "t": "GOTO",
+     "score": 25,
+     "ret": -0.378
+    },
+    {
+     "t": "MDKA",
+     "score": 16,
+     "ret": 0.8935
+    },
+    {
+     "t": "TPIA",
+     "score": 9,
+     "ret": -0.4133
+    }
+   ]
+  },
+  {
+   "fy": 2025,
+   "entry": "2026-05-01",
+   "exit": "2026-10-30",
+   "partial": true,
+   "months": 6,
+   "n": 45,
+   "yearsOfData": 4,
+   "avgAll": -0.2614,
+   "avgTop": -0.2809,
+   "avgBottom": -0.3971,
+   "spearman": 0.2469,
+   "hitRate": 0.5,
+   "top": [
+    {
+     "t": "EMTK",
+     "score": 88,
+     "ret": -0.6368
+    },
+    {
+     "t": "BBCA",
+     "score": 87,
+     "ret": -0.1559
+    },
+    {
+     "t": "ANTM",
+     "score": 86,
+     "ret": -0.3105
+    },
+    {
+     "t": "ICBP",
+     "score": 85,
+     "ret": -0.1949
+    },
+    {
+     "t": "BMRI",
+     "score": 84,
+     "ret": -0.1584
+    },
+    {
+     "t": "BUKA",
+     "score": 84,
+     "ret": -0.349
+    },
+    {
+     "t": "BRIS",
+     "score": 82,
+     "ret": -0.4385
+    },
+    {
+     "t": "CPIN",
+     "score": 82,
+     "ret": -0.3765
+    },
+    {
+     "t": "INDF",
+     "score": 79,
+     "ret": -0.0791
+    },
+    {
+     "t": "UNVR",
+     "score": 77,
+     "ret": -0.109
+    }
+   ],
+   "bottom": [
+    {
+     "t": "TBIG",
+     "score": 46,
+     "ret": -0.4076
+    },
+    {
+     "t": "HRUM",
+     "score": 41,
+     "ret": -0.3131
+    },
+    {
+     "t": "MBMA",
+     "score": 41,
+     "ret": -0.5585
+    },
+    {
+     "t": "INCO",
+     "score": 34,
+     "ret": -0.5025
+    },
+    {
+     "t": "MEDC",
+     "score": 30,
+     "ret": -0.2057
+    },
+    {
+     "t": "AMMN",
+     "score": 29,
+     "ret": -0.2626
+    },
+    {
+     "t": "GOTO",
+     "score": 27,
+     "ret": -0.5294
+    },
+    {
+     "t": "SMGR",
+     "score": 27,
+     "ret": -0.3391
+    },
+    {
+     "t": "EXCL",
+     "score": 22,
+     "ret": -0.4323
+    },
+    {
+     "t": "MDKA",
+     "score": 10,
+     "ret": -0.4203
+    }
+   ]
+  }
+ ]
+}
