@@ -1,0 +1,62 @@
+# Daftar harian trader top Hyperliquid untuk AInalyzer (indikator sentimen read-only).
+# Menjalankan tools/hl_top.py lalu menyimpan hl_top.json + hl_history.json di branch `data`.
+# Aplikasi membaca: https://raw.githubusercontent.com/<owner>/<repo>/data/hl_top.json
+name: Trader top Hyperliquid
+
+on:
+  schedule:
+    - cron: "15 0 * * *"   # 00:15 UTC = 07:15 WIB
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hl-top
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Ambil riwayat lama dari branch data
+        run: |
+          mkdir -p out
+          if git ls-remote --exit-code --heads origin data >/dev/null; then
+            git fetch --depth=1 origin data
+            git show FETCH_HEAD:hl_history.json > out/hl_history.json 2>/dev/null || rm -f out/hl_history.json
+          fi
+          ls -la out
+
+      - name: Buat daftar + snapshot posisi
+        run: python tools/hl_top.py --out out --snapshot
+
+      - name: Commit ke branch data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin data >/dev/null; then
+            git fetch -q --depth=1 origin data
+            git checkout -q -B data FETCH_HEAD
+          else
+            git checkout -q --orphan data
+            git rm -r -q --cached .
+          fi
+          cp out/hl_top.json out/hl_history.json .
+          git add hl_top.json hl_history.json
+          if git diff --cached --quiet; then
+            echo "Tidak ada perubahan."
+            exit 0
+          fi
+          git commit -q -m "Data trader top Hyperliquid $(date -u +%Y-%m-%d)"
+          git push origin HEAD:refs/heads/data
