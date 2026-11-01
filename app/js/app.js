@@ -1,11 +1,13 @@
 // Robot Trading — UI mobile (WebView). Sinyal analisa saja, tidak mengeksekusi order.
 import { SYMBOL_RE, normalize, analyzeSymbol, scan as scanAll } from './data.js';
 import { $, $$, esc, act, LABEL, fmt, pct, date, clock, ago, store } from './ui/util.js';
-import { ICON } from './ui/icons.js?v=1.2.1';
-import * as F from './fundamental.js?v=1.2.1';
-import BT from './fundamental_backtest.js?v=1.2.1';
+import { ICON } from './ui/icons.js?v=1.3.0';
+import * as F from './fundamental.js?v=1.3.0';
+import BT from './fundamental_backtest.js?v=1.3.0';
+import { loadSentiment } from './hyperliquid.js?v=1.3.0';
+import { hlCardHTML, hlSignalHTML } from './ui/hl.js?v=1.3.0';
 
-const VERSION = '1.2.1';
+const VERSION = '1.3.0';
 const MAX_WATCHLIST = 100;
 const K = { watchlist: 'rt.watchlist.v1', settings: 'rt.settings.v1', scan: 'rt.scan.v1' };
 
@@ -93,6 +95,7 @@ const state = {
   mktView: 'watch',      // 'watch' | 'fund' (segmen di tab Pasar)
   fund: { rows: new Map(), loading: false, done: 0, total: 0, seq: 0, filter: 'all', sort: 'score' },
   fundCur: { key: null, data: null, error: null, loading: false, seq: 0 }, // kartu Fundamental di tab Chart
+  hl: { data: null, error: null, errorAt: 0, loading: false, listOpen: false }, // posisi trader top Hyperliquid (crypto)
 };
 const optsOf = () => ({ strategy: state.settings.strategy, atr_stop: state.settings.atr_stop, ...(state.settings.ma200 ? { ma200: true } : {}) });
 const sigOf = () => `${state.settings.interval}|${state.settings.strategy}|${state.settings.atr_stop}|${state.settings.ma200 ? 'ma200' : ''}`;
@@ -394,6 +397,8 @@ function renderSignal() {
       : `<div class="empty">${emptyText}</div>`}`;
 
   const loadingFirst = state.scanning && !ok.length;
+  const cryptoItems = state.watchlist.filter(it => it.market === 'crypto');
+  if (cryptoItems.length && !state.scanning) ensureHl(); // dimuat setelah scan selesai agar start tetap cepat
   const skeleton = `<div class="list">${state.watchlist.slice(0, 3).map(it => assetRow(it)).join('')}</div>`;
 
   view.innerHTML = `
@@ -433,7 +438,8 @@ function renderSignal() {
           : section('sec-new', 'Sinyal baru', fresh,
             '<b>Belum ada sinyal baru</b>Tidak ada BUY atau SELL di candle terakhir. Cek lagi nanti.')
             + section('sec-hold', 'Sedang dipegang', hold, 'Tidak ada posisi yang sedang dipegang.')
-            + section('sec-near', 'Hampir sinyal', near, 'Belum ada aset yang mendekati sinyal BUY.')}
+            + section('sec-near', 'Hampir sinyal', near, 'Belum ada aset yang mendekati sinyal BUY.')
+            + hlSignalHTML({ hl: state.hl, items: cryptoItems, avatar })}
       ${errs ? `<p class="note" style="text-align:center">${errs} simbol gagal dimuat — lihat tab Pasar.</p>` : ''}
     </div>`;
 }
@@ -1017,6 +1023,33 @@ function renderChart() {
     startLive(d);
   }
   if (cur.market === 'saham') ensureFundCur(cur.symbol);
+  if (cur.market === 'crypto' && d && !state.detailError) ensureHl();
+}
+
+// ---- kartu Posisi Trader Top Hyperliquid (crypto saja; sentimen read-only)
+function ensureHl(fresh = false) {
+  const h = state.hl;
+  if (h.loading) return;
+  if (!fresh && h.data && Date.now() - h.data.at < 5 * 60e3) return;
+  if (!fresh && h.error && Date.now() - h.errorAt < 60e3) return;
+  h.loading = true;
+  if (fresh) { h.error = null; paintHl(); }
+  loadSentiment(50, { fresh }).then(r => { h.data = r; h.error = null; })
+    .catch(e => { h.error = e && e.message ? e.message : 'Gagal memuat data Hyperliquid.'; h.errorAt = Date.now(); })
+    .finally(() => { h.loading = false; paintHl(); });
+}
+function hlCard() {
+  const d = state.data;
+  try {
+    return hlCardHTML({ hl: state.hl, symbol: state.current.symbol, action: d && d.action, price: d && d.price, currency: d && d.currency, listOpen: state.hl.listOpen });
+  } catch (e) {
+    return `<div class="card hl"><h3>Posisi Trader Top Hyperliquid</h3><p class="note">Tidak bisa ditampilkan: ${esc(e && e.message)}</p></div>`;
+  }
+}
+function paintHl() {
+  const el = $('#hlCard');
+  if (el && state.tab === 'chart') el.innerHTML = hlCard();
+  if (state.tab === 'signal') scheduleRender();
 }
 
 function detailHTML(d) {
@@ -1050,6 +1083,7 @@ function detailHTML(d) {
       ${lastSig ? `<div class="last">Sinyal terakhir: <b>${esc(lastSig.type)}</b> ${esc(date(lastSig.time, iv))} @ <b class="mono">${fmt(lastSig.price, cur)}</b><br>${esc(lastSig.reason)}</div>` : ''}
     </div>
     ${d.market === 'saham' ? `<div id="fundCard">${fundCardHTML()}</div>` : ''}
+    ${d.market === 'crypto' ? `<div id="hlCard">${hlCard()}</div>` : ''}
 
     <div class="card">
       <div class="gauge-head"><span>Kondisi pasar (skor indikator)</span><b>${score > 0 ? '+' : ''}${esc(score)}</b></div>
@@ -1166,11 +1200,14 @@ $('#view-chart').addEventListener('click', e => {
   if (c.dataset.c === 'retry') return loadDetail(true);
   if (c.dataset.c === 'fundretry') { state.fundCur.key = null; return ensureFundCur(state.current.symbol, true); }
   if (c.dataset.c === 'fundrank') { state.mktView = 'fund'; return navigate('market'); }
+  if (c.dataset.c === 'hlretry') return ensureHl(true);
   if (c.dataset.c === 'alltrades') {
     state.showAllTrades = true;
     const y = window.scrollY; renderChart(); window.scrollTo(0, y);
   }
 });
+
+$('#view-chart').addEventListener('toggle', e => { if (e.target.id === 'hlList') state.hl.listOpen = e.target.open; }, true);
 
 // ---------------------------------------------------------------- lightweight-charts
 const C = {
@@ -1408,6 +1445,16 @@ function renderMore() {
           <p><b>Fundamental</b> (Pasar › Peringkat Fundamental, dan kartu Fundamental di Chart) membaca laporan keuangan: untung tidak, tumbuh tidak, utangnya aman tidak, harganya mahal tidak. Gunanya untuk <b>memilih saham apa</b>. <b>Teknikal</b> (sinyal BUY/SELL) membaca gerak harga untuk menentukan <b>kapan beli atau jual</b>. Skor fundamental bukan ramalan harga — hasil uji historisnya (jujur, apa adanya) ada di Peringkat Fundamental › <i>Seberapa bisa dipercaya?</i> Pakai sebagai saringan awal, lalu gabungkan dengan sinyal teknikal dan pertimbangan Anda sendiri.</p>
           <p style="margin-top:10px"><b>Turtle & Filter MA200</b></p>
           <p>Strategi <b>Turtle</b> meniru aturan Turtle Traders: BUY saat close menembus harga tertinggi 20 candle sebelumnya, SELL saat close jatuh di bawah terendah 10 candle atau kena stop loss tetap. <b>Filter MA200</b> menahan sinyal BUY selama harga di bawah rata-rata 200 candle, supaya tidak membeli saat tren besar turun (tidak berlaku untuk strategi Beli saat Koreksi, yang sudah memakai EMA200).</p>
+          <p style="margin-top:10px"><b>Posisi trader top Hyperliquid (crypto)</b></p>
+          <p>Di Chart crypto ada kartu yang menunjukkan berapa dari 50 trader paling untung di bursa Hyperliquid sedang <b>long</b> (bertaruh naik) atau <b>short</b> (bertaruh turun) di koin itu, lalu dibandingkan dengan sinyal robot. Daftar trader diperbarui harian; posisinya diambil live dan hanya dibaca — aplikasi tidak memakai dompet atau kunci apa pun. Ini <b>sentimen pelengkap, bukan sinyal</b>. Catatan:</p>
+          <ul>
+            <li>"Top" dipilih dari laba masa lalu — bisa karena beruntung atau memakai leverage tinggi.</li>
+            <li>Bias seleksi: pemenang terbaru biasanya memang sedang berposisi searah gerak harga terakhir.</li>
+            <li>Posisi short bisa sekadar lindung nilai (hedge) atas aset lain, bukan pandangan turun.</li>
+            <li>Beberapa akun paus menguasai sebagian besar nilai posisi, jadi patokan utamanya <b>jumlah trader</b>, nilai posisi hanya pelengkap.</li>
+            <li>Belum terbukti meningkatkan hasil. Riwayatnya dicatat setiap hari untuk diuji secara jujur nanti.</li>
+            <li>Hanya untuk crypto yang diperdagangkan di Hyperliquid.</li>
+          </ul>
         </div>
       </details>
       <details class="acc">

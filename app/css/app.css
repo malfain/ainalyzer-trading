@@ -629,6 +629,31 @@ body[data-tab="chart"] .views { padding-top: calc(var(--sat) + 10px); }
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
+/* ---------------------------------------------------------------- posisi trader top Hyperliquid */
+.hl-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--surface-3); gap: 2px; }
+.hl-bar i { display: block; height: 100%; min-width: 0; }
+.hl-bar i.l { background: var(--buy); border-radius: 6px 0 0 6px; }
+.hl-bar i.s { background: var(--sell); border-radius: 0 6px 6px 0; }
+.hl-bar i[style*="width:0%"] { display: none; }
+.hl-bar.sm { width: 92px; height: 8px; border-radius: 4px; }
+.hl-legend { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; margin-top: 6px; font-family: var(--mono); }
+.hl-head { margin: 10px 0 0; font-size: 14px; color: #c6cfdf; line-height: 1.45; }
+.hl-head b { color: var(--text); }
+.hl .kv small { display: block; font-size: 11px; margin-top: 2px; }
+.hl-int { display: flex; align-items: flex-start; gap: 10px; margin-top: 12px; padding: 11px 12px; border-radius: 16px; font-size: 13.5px; line-height: 1.45; background: var(--surface-2); border: 1px solid var(--line); }
+.hl-int .badge { min-width: 0; flex: none; }
+.hl-int.t-ok { background: var(--buy-bg); border-color: rgba(22, 199, 132, .3); }
+.hl-int.t-warn { background: rgba(240, 185, 11, .08); border-color: rgba(240, 185, 11, .3); color: #f5d77a; }
+.hl-more { border-color: var(--line-2); background: var(--surface-2); }
+.hl-more summary { color: var(--text); }
+.hl-more .ttable { padding: 0 12px 6px; }
+.tr.hl-tr { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto; }
+.tr.hl-tr .res small { margin-top: 0; }
+.hl-foot { font-size: 11.5px; }
+.hl-r { justify-content: center; }
+.hl-cnt { font-size: 12px; white-space: nowrap; }
+.hl-few { font-size: 12px; white-space: nowrap; }
+
 @media (min-width: 390px) {
   .bars { grid-template-columns: repeat(4, 38px); }
   .price-sym, .price-big { font-size: 34px; }
