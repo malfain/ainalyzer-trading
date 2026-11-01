@@ -1,13 +1,13 @@
 // Robot Trading — UI mobile (WebView). Sinyal analisa saja, tidak mengeksekusi order.
 import { SYMBOL_RE, normalize, analyzeSymbol, scan as scanAll } from './data.js';
 import { $, $$, esc, act, LABEL, fmt, pct, date, clock, ago, store } from './ui/util.js';
-import { ICON } from './ui/icons.js?v=1.3.0';
-import * as F from './fundamental.js?v=1.3.0';
-import BT from './fundamental_backtest.js?v=1.3.0';
-import { loadSentiment } from './hyperliquid.js?v=1.3.0';
-import { hlCardHTML, hlSignalHTML } from './ui/hl.js?v=1.3.0';
+import { ICON } from './ui/icons.js?v=1.4.0';
+import * as F from './fundamental.js?v=1.4.0';
+import BT from './fundamental_backtest.js?v=1.4.0';
+import { loadSentiment } from './hyperliquid.js?v=1.4.0';
+import { hlCardHTML, hlSignalHTML } from './ui/hl.js?v=1.4.0';
 
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const MAX_WATCHLIST = 100;
 const K = { watchlist: 'rt.watchlist.v1', settings: 'rt.settings.v1', scan: 'rt.scan.v1' };
 
@@ -93,10 +93,14 @@ const state = {
   data: null, dataAt: 0, detailError: null, detailLoading: false, selSeq: 0,
   showAllTrades: false,
   mktView: 'watch',      // 'watch' | 'fund' (segmen di tab Pasar)
-  fund: { rows: new Map(), loading: false, done: 0, total: 0, seq: 0, filter: 'all', sort: 'score' },
+  fund: { rows: new Map(), loading: false, done: 0, total: 0, seq: 0, filter: 'all', sort: 'score', dir: -1 },
   fundCur: { key: null, data: null, error: null, loading: false, seq: 0 }, // kartu Fundamental di tab Chart
   hl: { data: null, error: null, errorAt: 0, loading: false, listOpen: false }, // posisi trader top Hyperliquid (crypto)
+  wsort: { k: null, dir: 1 }, // urutan tabel daftar pantau (desktop); k null = urutan asli
 };
+// Layout desktop (>= 1024px): sidebar + grid lebar. Ponsel/APK tetap memakai layout satu kolom.
+const DESK_MQ = window.matchMedia ? window.matchMedia('(min-width: 1024px)') : null;
+let desk = !!(DESK_MQ && DESK_MQ.matches);
 const optsOf = () => ({ strategy: state.settings.strategy, atr_stop: state.settings.atr_stop, ...(state.settings.ma200 ? { ma200: true } : {}) });
 const sigOf = () => `${state.settings.interval}|${state.settings.strategy}|${state.settings.atr_stop}|${state.settings.ma200 ? 'ma200' : ''}`;
 const saveSettings = () => store.set(K.settings, state.settings);
@@ -135,7 +139,7 @@ function toast(msg) {
 }
 
 function setSpin(on) {
-  for (const b of [$('#refreshBtn'), $('#scanFab')]) {
+  for (const b of [$('#refreshBtn'), $('#scanFab'), $('#sideScan')]) {
     b.classList.toggle('spinning', on);
     b.setAttribute('aria-busy', on ? 'true' : 'false');
   }
@@ -151,10 +155,12 @@ function greeting() {
 const freshCount = () => [...state.rows.values()].filter(r => !r.error && (r.action === 'BUY' || r.action === 'SELL')).length;
 
 // ---------------------------------------------------------------- navigasi (history -> tombol back Android)
+const TAB_TITLE = { signal: 'Sinyal', market: 'Pasar', chart: 'Chart', more: 'Lainnya' };
 function showTab(tab) {
   const prev = state.tab;
   state.tab = tab;
   document.body.dataset.tab = tab;
+  $('#topTitle').textContent = TAB_TITLE[tab] || '';
   $('#greet').textContent = tab === 'market' ? (state.mktView === 'fund' ? 'Peringkat fundamental' : 'Daftar pantau') : tab === 'more' ? 'Pengaturan & bantuan' : greeting() + '!';
   for (const v of $$('.view')) v.hidden = v.dataset.tab !== tab;
   for (const b of $$('.tab')) {
@@ -236,7 +242,7 @@ function confirmRemove(symbol, market) {
 
 function openPicker() {
   if (!state.watchlist.length) return navigate('market');
-  openSheet(`<h3>Pilih aset</h3><p>Ketuk aset untuk membuka chart & sinyalnya.</p>
+  openSheet(`<h3>Pilih aset</h3><p>Pilih aset untuk membuka chart & sinyalnya.</p>
     <div class="picker-grid" style="max-height:50vh;overflow:auto">${pickButtons('pick')}</div>`,
   { pick: b => openSymbol(b.dataset.s, b.dataset.m) });
 }
@@ -283,7 +289,7 @@ async function runScan(items = null) {
 let raf = 0;
 function scheduleRender() {
   if (raf) return;
-  raf = requestAnimationFrame(() => { raf = 0; if (state.tab !== 'chart' && state.tab !== 'more') render(state.tab); updateTabBadge(); });
+  raf = requestAnimationFrame(() => { raf = 0; if (state.tab !== 'chart' && state.tab !== 'more') render(state.tab); updateTabBadge(); paintSide(); });
 }
 
 function refreshAll() {
@@ -296,12 +302,32 @@ function updateTabBadge() {
   const bell = $('#bellBtn');
   bell.classList.toggle('has-new', n > 0);
   bell.setAttribute('aria-label', n ? `Lihat ${n} sinyal baru` : 'Sinyal baru (belum ada)');
-  const tab = $('.tab[data-tab="signal"]');
-  let dot = tab.querySelector('.dot-n');
-  if (!n) { if (dot) dot.remove(); tab.removeAttribute('aria-label'); return; }
-  if (!dot) { dot = document.createElement('span'); dot.className = 'dot-n'; tab.appendChild(dot); }
-  dot.textContent = n > 9 ? '9+' : String(n);
-  tab.setAttribute('aria-label', `Sinyal, ${n} sinyal baru`);
+  for (const tab of $$('.tab[data-tab="signal"]')) {
+    let dot = tab.querySelector('.dot-n');
+    if (!n) { if (dot) dot.remove(); tab.removeAttribute('aria-label'); continue; }
+    if (!dot) { dot = document.createElement('span'); dot.className = 'dot-n'; tab.appendChild(dot); }
+    dot.textContent = n > 9 ? '9+' : String(n);
+    tab.setAttribute('aria-label', `Sinyal, ${n} sinyal baru`);
+  }
+}
+
+// sidebar desktop: status scan, update terakhir, ringkasan pengaturan
+function paintSide() {
+  if (!desk) return;
+  const st = state.settings;
+  const txt = $('#sideScanTxt'), prog = $('#sideProg');
+  txt.textContent = state.scanning ? `Memindai ${state.scanDone}/${state.scanTotal}` : 'Scan sinyal';
+  prog.hidden = !state.scanning;
+  prog.firstElementChild.style.width = `${state.scanTotal ? Math.round(state.scanDone / state.scanTotal * 100) : 0}%`;
+  $('#sideFoot').innerHTML = `
+    <div class="side-upd"><span>Update terakhir</span><b class="mono">${state.lastScan ? esc(clock(state.lastScan)) : '–'}</b></div>
+    <div class="chips">
+      <span class="chip">TF <b>${esc(ivName(st.interval))}</b></span>
+      <span class="chip"><b>${esc(STRATEGIES[st.strategy].name)}</b></span>
+      <span class="chip">Stop <b>${esc(st.atr_stop)}× ATR</b></span>
+      <span class="chip${st.ma200 ? ' on' : ''}">MA200 <b>${st.ma200 ? 'aktif' : 'mati'}</b></span>
+    </div>
+    <button type="button" class="link side-set" data-tab-go="more">Ubah pengaturan</button>`;
 }
 
 // ---------------------------------------------------------------- baris aset
@@ -401,7 +427,7 @@ function renderSignal() {
   if (cryptoItems.length && !state.scanning) ensureHl(); // dimuat setelah scan selesai agar start tetap cepat
   const skeleton = `<div class="list">${state.watchlist.slice(0, 3).map(it => assetRow(it)).join('')}</div>`;
 
-  view.innerHTML = `
+  const hero = `
     <div class="hero">
       <div class="hero-top">
         <div class="hero-k">Sinyal hari ini</div>
@@ -418,7 +444,14 @@ function renderSignal() {
         <span class="chip">Stop <b>${esc(st.atr_stop)}× ATR</b></span>
         ${st.ma200 ? '<span class="chip on"><b>MA200</b></span>' : ''}
       </div>
-    </div>
+    </div>`;
+
+  if (desk) {
+    view.innerHTML = signalDeskHTML({ hero, fresh, hold, near, cryptoItems, loadingFirst, section, errs });
+    return;
+  }
+  view.innerHTML = `
+    ${hero}
 
     <div class="cta">
       <button type="button" class="pill primary" data-q="scan">${ICON.refresh}Scan</button>
@@ -444,6 +477,35 @@ function renderSignal() {
     </div>`;
 }
 
+// Dasbor desktop: grid 12 kolom (hero + sinyal baru + sentimen, daftar pantau, dipegang + hampir sinyal)
+function signalDeskHTML({ hero, fresh, hold, near, cryptoItems, loadingFirst, section, errs }) {
+  const box = (cls, inner) => `<section class="dcard ${cls}">${inner}</section>`;
+  const wl = state.watchlist;
+  const skel = `<div class="list">${wl.slice(0, 3).map(it => assetRow(it)).join('')}</div>`;
+  const hl = cryptoItems.length
+    ? hlSignalHTML({ hl: state.hl, items: cryptoItems, avatar })
+    : `<div class="section-h first" id="sec-hl"><h2>Sentimen trader top</h2><span class="hint">Hyperliquid</span></div>
+       <div class="empty"><b>Belum ada crypto</b>Tambahkan koin (mis. BTC) ke daftar pantau untuk melihat posisi 50 trader top Hyperliquid.</div>`;
+  const newSec = !wl.length
+    ? `<div class="section-h first" id="sec-new"><h2>Sinyal baru</h2></div><div class="empty"><b>Daftar pantauan kosong</b>Tambahkan saham atau crypto dulu.</div>`
+    : loadingFirst
+      ? `<div class="section-h first" id="sec-new"><h2>Sinyal baru</h2><span class="hint">memindai…</span></div>${skel}`
+      : section('sec-new', 'Sinyal baru <small>BUY / SELL</small>', fresh, '<b>Belum ada sinyal baru</b>Tidak ada BUY atau SELL di candle terakhir. Cek lagi nanti.');
+  return `<div class="dgrid">
+    <div class="d-hero">${hero}</div>
+    ${box('d-new', newSec)}
+    ${box('d-hl', hl)}
+    ${box('d-watch', `<div class="section-h first"><h2>Daftar Pantau <span class="count">${wl.length}</span></h2>
+        <div class="d-acts"><button type="button" class="btn" data-q="market">Lihat tabel</button><button type="button" class="btn primary-soft" data-q="add">${ICON.plus}Tambah aset</button></div></div>
+      ${wl.length
+        ? `<div class="wgrid" role="list">${wl.map(it => watchCard(it)).join('')}</div>`
+        : '<div class="empty"><b>Daftar pantauan kosong</b>Tambahkan saham atau crypto di tab Pasar.</div>'}
+      ${errs ? `<p class="note">${errs} simbol gagal dimuat — lihat tab Pasar.</p>` : ''}`)}
+    ${box('d-hold', wl.length && !loadingFirst ? section('sec-hold', 'Sedang dipegang', hold, 'Tidak ada posisi yang sedang dipegang.') : `<div class="section-h first"><h2>Sedang dipegang</h2></div>${loadingFirst ? skel : '<div class="empty">Tidak ada posisi yang sedang dipegang.</div>'}`)}
+    ${box('d-near', wl.length && !loadingFirst ? section('sec-near', 'Hampir sinyal', near, 'Belum ada aset yang mendekati sinyal BUY.') : `<div class="section-h first"><h2>Hampir sinyal</h2></div>${loadingFirst ? skel : '<div class="empty">Belum ada aset yang mendekati sinyal BUY.</div>'}`)}
+  </div>`;
+}
+
 function goAdd() {
   navigate('market');
   setTimeout(() => {
@@ -459,6 +521,7 @@ $('#view-signal').addEventListener('click', e => {
   if (q) {
     if (q.dataset.q === 'scan') return refreshAll();
     if (q.dataset.q === 'add') return goAdd();
+    if (q.dataset.q === 'market') { state.mktView = 'watch'; return navigate('market'); }
   }
   const row = e.target.closest('.row, .wcard');
   if (row) openSymbol(row.dataset.s, row.dataset.m);
@@ -466,6 +529,7 @@ $('#view-signal').addEventListener('click', e => {
 
 // ---------------------------------------------------------------- tab Pasar
 function renderMarketShell() {
+  if (desk) return renderMarketShellDesk();
   $('#view-market').innerHTML = `
     <h1 class="page-h">Pasar</h1>
     <div class="seg mview" role="group" aria-label="Tampilan pasar" id="mktView">
@@ -499,6 +563,94 @@ function renderMarketShell() {
     <div id="mktFund" hidden>${fundShellHTML()}</div>`;
 }
 
+// Pasar versi desktop: toolbar (filter + form tambah + ubah) di atas tabel lebar yang bisa diurutkan
+function renderMarketShellDesk() {
+  $('#view-market').innerHTML = `
+    <div class="mk-head">
+      <div class="seg mview" role="group" aria-label="Tampilan pasar" id="mktView">
+        <button type="button" data-v="watch">Daftar Pantau</button><button type="button" data-v="fund">Peringkat Fundamental</button>
+      </div>
+    </div>
+    <div id="mktWatch">
+      <div class="dcard mk-card">
+        <div class="mk-tools">
+          <div class="seg" role="group" aria-label="Filter pasar" id="mktFilter">
+            <button type="button" data-f="all">Semua</button><button type="button" data-f="saham">Saham</button><button type="button" data-f="crypto">Crypto</button>
+          </div>
+          <form class="add-inline" id="addForm" autocomplete="off" novalidate>
+            <label class="field">${ICON.search}<input type="text" id="addSym" placeholder="Tambah kode, mis. BBCA atau BTC" maxlength="20" autocapitalize="characters" spellcheck="false" enterkeyhint="done" aria-label="Kode simbol"></label>
+            <div class="seg" role="group" aria-label="Jenis pasar" id="addMkt">
+              <button type="button" data-m="saham">Saham</button><button type="button" data-m="crypto">Crypto</button>
+            </div>
+            <button type="submit" class="pill primary">${ICON.plus}Tambah</button>
+          </form>
+          <button type="button" class="btn" id="editBtn" aria-pressed="false">Ubah</button>
+        </div>
+        <div class="form-err" id="addErr" role="alert" hidden></div>
+        <div class="section-h"><h2 id="mktTitle">Daftar pantauan</h2><span class="hint" id="mktHint"></span></div>
+        <div id="mktList"></div>
+        <p class="note">Saham IDX cukup 4 huruf (BBCA). Crypto cukup kodenya (BTC → BTCUSDT). Klik judul kolom untuk mengurutkan, klik baris untuk membuka chart.</p>
+      </div>
+    </div>
+    <div id="mktFund" hidden>${fundShellHTML()}</div>`;
+}
+
+// tombol judul kolom yang bisa diurutkan (aria-sort di <th>)
+function sortTh(label, key, cur, attr, cls = '') {
+  const on = cur.k === key;
+  const sort = on ? (cur.dir > 0 ? 'ascending' : 'descending') : 'none';
+  return `<th scope="col" class="${cls}" aria-sort="${sort}"><button type="button" class="th-btn" ${attr}="${esc(key)}">${label}<span class="th-ar" aria-hidden="true">${on ? (cur.dir > 0 ? '▲' : '▼') : '↕'}</span></button></th>`;
+}
+const ACT_ORDER = { BUY: 0, SELL: 1, HOLD: 2, WAIT: 3 };
+const WSORT = {
+  sym: { v: (it) => it.symbol, dir: 1 },
+  market: { v: (it) => it.market, dir: 1 },
+  price: { v: (it, r) => (r && !r.error ? r.price : null), dir: -1 },
+  action: { v: (it, r) => (r && !r.error ? ACT_ORDER[act(r.action)] : null), dir: 1 },
+  since: { v: (it, r) => sinceSig(r), dir: -1 },
+  last: { v: (it, r) => (r && !r.error && r.last_signal ? r.last_signal.time : null), dir: -1 },
+  score: { v: (it, r) => (r && !r.error && r.score != null ? Number(r.score) : null), dir: -1 },
+};
+// urutkan dengan nilai kosong selalu di bawah
+function sortBy(list, val, dir) {
+  return list.map((x, i) => [x, val(x), i]).sort((a, b) => {
+    const na = a[1] == null || Number.isNaN(a[1]), nb = b[1] == null || Number.isNaN(b[1]);
+    if (na || nb) return na === nb ? a[2] - b[2] : na ? 1 : -1;
+    const c = typeof a[1] === 'string' ? a[1].localeCompare(b[1]) : a[1] - b[1];
+    return c * dir || a[2] - b[2];
+  }).map(x => x[0]);
+}
+
+function watchTableHTML(list) {
+  const ws = state.wsort;
+  const sorted = ws.k && WSORT[ws.k] ? sortBy(list, it => WSORT[ws.k].v(it, rowFor(it)), ws.dir) : list;
+  const th = (l, k, c) => sortTh(l, k, ws, 'data-ws', c);
+  const body = sorted.map(it => {
+    const r = rowFor(it), s = esc(it.symbol), m = esc(it.market);
+    const ok = r && !r.error;
+    const name = ok ? r.name : r && r.error ? r.error : state.scanning ? '' : 'Belum di-scan';
+    const load = !r && state.scanning;
+    const ls = ok ? r.last_signal : null;
+    const a = ok ? act(r.action) : null;
+    const score = ok && r.score != null ? Number(r.score) : null;
+    return `<tr class="trow" tabindex="0" data-s="${s}" data-m="${m}" aria-label="${s}${ok ? ', sinyal ' + esc(a) : ''}${state.edit ? '' : ', buka chart'}">
+      <td><div class="t-asset">${avatar(it.symbol, 'sm')}<div class="t-id"><b>${s}</b><span class="${r && r.error ? 'neg' : ''}">${load ? '<span class="skel" style="width:110px"></span>' : esc(name)}</span></div></div></td>
+      <td>${mkTag(it.market)}</td>
+      <td class="num r">${ok ? `<b>${fmt(r.price, r.currency)}</b> <small class="muted">${esc(r.currency || '')}</small>` : load ? '<span class="skel" style="width:70px"></span>' : '<span class="muted">–</span>'}</td>
+      <td>${ok ? `<span class="badge ${a}">${a}</span>` : r && r.error ? '<span class="badge ERR">ERROR</span>' : `<span class="badge LOAD">${load ? '···' : '—'}</span>`}</td>
+      <td class="r">${ok ? chgPill(sinceSig(r)) : '<span class="muted">–</span>'}</td>
+      <td>${ls ? `<span class="t-last"><b class="${ls.type === 'BUY' ? 'pos' : 'neg'}">${esc(ls.type)}</b> ${esc(date(ls.time, isIntraday(state.settings.interval)))}<small class="muted">${esc(ago(ls.time))} · @ <span class="mono">${fmt(ls.price, r.currency)}</span></small></span>` : '<span class="muted">–</span>'}</td>
+      <td class="r">${score == null ? '<span class="muted">–</span>' : `<span class="t-score"><span class="mono ${score > 0 ? 'pos' : score < 0 ? 'neg' : ''}">${score > 0 ? '+' : ''}${esc(score)}</span><i class="t-meter"><i style="left:${Math.max(0, Math.min(100, (score + 100) / 2))}%"></i></i></span>`}</td>
+      <td class="r">${state.edit
+        ? `<button type="button" class="row-del sm" data-del="${s}" data-m="${m}" aria-label="Hapus ${s}">${ICON.trash}</button>`
+        : `<span class="t-go" aria-hidden="true">${ICON.chev}</span>`}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="tscroll"><table class="dtable wtable">
+    <thead><tr>${th('Aset', 'sym')}${th('Pasar', 'market')}${th('Harga', 'price', 'r')}${th('Sinyal', 'action')}${th('Sejak sinyal', 'since', 'r')}${th('Sinyal terakhir', 'last')}${th('Skor indikator', 'score', 'r')}<th scope="col" class="r">${state.edit ? 'Hapus' : 'Aksi'}</th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+
 function renderMarket() {
   for (const b of $$('#mktView button')) b.setAttribute('aria-pressed', String(b.dataset.v === state.mktView));
   $('#mktWatch').hidden = state.mktView !== 'watch';
@@ -512,9 +664,9 @@ function renderMarket() {
   eb.classList.toggle('on', state.edit);
   const list = state.watchlist.filter(w => state.filter === 'all' || w.market === state.filter);
   $('#mktTitle').textContent = `Daftar pantauan (${list.length})`;
-  $('#mktHint').textContent = state.edit ? 'Ketuk ikon untuk hapus' : 'Tekan lama untuk hapus';
+  $('#mktHint').textContent = desk ? (state.edit ? 'Klik ikon tempat sampah untuk hapus' : '') : state.edit ? 'Ketuk ikon untuk hapus' : 'Tekan lama untuk hapus';
   $('#mktList').innerHTML = list.length
-    ? `<div class="list">${list.map(it => assetRow(it, { edit: state.edit })).join('')}</div>`
+    ? desk ? watchTableHTML(list) : `<div class="list">${list.map(it => assetRow(it, { edit: state.edit })).join('')}</div>`
     : `<div class="empty"><b>Belum ada aset</b>${state.filter === 'all' ? 'Tambahkan kode saham atau crypto di bawah.' : 'Tidak ada aset di kategori ini.'}</div>`;
 }
 
@@ -534,9 +686,17 @@ mv.addEventListener('click', e => {
   const m = e.target.closest('#addMkt [data-m]');
   if (m) { state.addMarket = m.dataset.m; return renderMarket(); }
   if (e.target.closest('#editBtn')) { state.edit = !state.edit; return renderMarket(); }
+  const wsb = e.target.closest('[data-ws]');
+  if (wsb) {
+    const k = wsb.dataset.ws;
+    if (!WSORT[k]) return;
+    const ws = state.wsort;
+    if (ws.k !== k) { ws.k = k; ws.dir = WSORT[k].dir; } else if (ws.dir === WSORT[k].dir) ws.dir = -ws.dir; else ws.k = null; // klik ke-3: urutan asli
+    return renderMarket();
+  }
   const del = e.target.closest('[data-del]');
   if (del) return confirmRemove(del.dataset.del, del.dataset.m);
-  const row = e.target.closest('.row');
+  const row = e.target.closest('.row, .trow');
   if (row && !state.edit) openSymbol(row.dataset.s, row.dataset.m);
 });
 mv.addEventListener('submit', e => {
@@ -605,7 +765,7 @@ mv.addEventListener('contextmenu', e => { if (e.target.closest('.row')) e.preven
 
 // enter/spasi pada baris (role=button) untuk keyboard
 document.addEventListener('keydown', e => {
-  if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('row')) {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && (e.target.classList.contains('row') || e.target.classList.contains('trow'))) {
     e.preventDefault(); e.target.click();
   }
 });
@@ -639,14 +799,14 @@ function fundShellHTML() {
       <div id="fundHead"></div>
     </div>
     <div class="fund-warn"><b>Bukan ramalan harga.</b> Skor menilai kesehatan perusahaan, bukan memastikan sahamnya naik setahun ke depan. ${esc(btOneLiner())}</div>
-    <div class="toolbar" style="margin-top:14px">
+    ${desk ? '<div class="fund-filters">' : ''}<div class="toolbar" style="margin-top:14px">
       <div class="seg" role="group" aria-label="Filter sektor" id="fundFilter">
         <button type="button" data-ff="all">Semua</button><button type="button" data-ff="bank">Bank</button><button type="button" data-ff="nonbank">Non-bank</button>
       </div>
     </div>
     <div class="fchips" role="group" aria-label="Urutkan menurut" id="fundSort">
       <span class="fchips-l">Urut:</span>${FSORTS.map(s => `<button type="button" data-fs="${s.v}">${esc(s.name)}</button>`).join('')}
-    </div>
+    </div>${desk ? '</div>' : ''}
     <div class="panel" style="margin-top:12px">
       <div class="grab" aria-hidden="true"></div>
       <div id="fundList"></div>
@@ -749,7 +909,7 @@ function renderFund() {
   const list = fundUniverse();
   if (!f.loading && list.some(t => !f.rows.has(t))) startFund();
   for (const b of $$('#fundFilter button')) b.setAttribute('aria-pressed', String(b.dataset.ff === f.filter));
-  for (const b of $$('#fundSort button')) b.setAttribute('aria-pressed', String(b.dataset.fs === f.sort));
+  for (const b of $$('#fundSort button')) b.setAttribute('aria-pressed', String(b.dataset.fs === f.sort && f.dir < 0));
   const rows = list.map(t => f.rows.get(t)).filter(Boolean);
   const ok = rows.filter(r => !r.error), errs = rows.filter(r => r.error);
   $('#fundHead').innerHTML = f.loading
@@ -757,18 +917,28 @@ function renderFund() {
        <div class="progress" aria-hidden="true"><i style="width:${f.total ? Math.round(f.done / f.total * 100) : 0}%"></i></div>`
     : `<div class="fund-prog">${ok.length} saham dinilai${errs.length ? ` · <span class="neg">${errs.length} gagal</span>` : ''}${ok.length ? ` · data ${esc(clock(Math.min(...ok.map(r => r.at))))}, disimpan 24 jam` : ''}</div>`;
   const byFilter = r => f.filter === 'all' || (f.filter === 'bank' ? r.bank : !r.bank);
-  const key = r => (f.sort === 'score' ? r.score : (r.sub || {})[f.sort]) ?? -1;
+  if (desk) {
+    const shownErr = errs.filter(r => f.filter === 'all' || (f.filter === 'bank' ? F.isBank(r.ticker) : !F.isBank(r.ticker)));
+    const pending = f.loading ? list.filter(t => !f.rows.has(t)).filter(t => f.filter === 'all' || (f.filter === 'bank' ? F.isBank(t) : !F.isBank(t))) : [];
+    const shown = ok.filter(byFilter);
+    $('#fundList').innerHTML = shown.length || shownErr.length || pending.length
+      ? fundTableHTML(shown, shownErr, pending)
+      : '<div class="empty"><b>Belum ada data</b>Klik Muat ulang untuk mengambil laporan keuangan.</div>';
+    return;
+  }
+  const sortKey = FSORTS.some(s => s.v === f.sort) ? f.sort : 'score'; // kolom khusus tabel desktop -> skor
+  const key = r => (sortKey === 'score' ? r.score : (r.sub || {})[sortKey]) ?? -1;
   const shown = ok.filter(byFilter).sort((a, b) => key(b) - key(a) || b.score - a.score || a.ticker.localeCompare(b.ticker));
   const shownErr = errs.filter(r => f.filter === 'all' || (f.filter === 'bank' ? F.isBank(r.ticker) : !F.isBank(r.ticker)));
   const pending = f.loading ? list.filter(t => !f.rows.has(t)).filter(t => f.filter === 'all' || (f.filter === 'bank' ? F.isBank(t) : !F.isBank(t))) : [];
   const row = (r, i) => {
     const t = esc(r.ticker), bc = bandCls(r.band && r.band.key);
-    const val = f.sort === 'score' ? r.score : (r.sub || {})[f.sort];
+    const val = sortKey === 'score' ? r.score : (r.sub || {})[sortKey];
     return `<div class="row frow" role="button" tabindex="0" data-s="${t}" data-m="saham" aria-label="Peringkat ${i + 1}, ${t}, skor ${esc(r.score)}, ${esc(r.band && r.band.label)}">
       <span class="frank mono">${i + 1}</span>
       ${avatar(r.ticker)}
       <div class="row-main"><div class="row-t"><span class="sym">${t}</span><span class="mk sec">${esc(r.sector)}</span>${warnChip(r)}</div><div class="row-s">${esc(r.reason)}</div></div>
-      <div class="row-r"><span class="fscore ${bc}">${esc(val)}</span><span class="fband">${f.sort === 'score' ? esc(r.band && r.band.label) : esc((FSORTS.find(s => s.v === f.sort) || {}).name)}</span></div></div>`;
+      <div class="row-r"><span class="fscore ${bc}">${esc(val)}</span><span class="fband">${sortKey === 'score' ? esc(r.band && r.band.label) : esc((FSORTS.find(s => s.v === sortKey) || {}).name)}</span></div></div>`;
   };
   const errRow = r => `<div class="row frow" role="button" tabindex="0" data-s="${esc(r.ticker)}" data-m="saham" aria-label="${esc(r.ticker)}, gagal dimuat">
       <span class="frank mono">–</span>${avatar(r.ticker)}
@@ -781,14 +951,74 @@ function renderFund() {
     : '<div class="empty"><b>Belum ada data</b>Ketuk Muat ulang untuk mengambil laporan keuangan.</div>';
 }
 
+// tabel peringkat fundamental (desktop)
+const nigOf = m => (m.core <= 0 || m.turnaround ? null : m.niCagr != null ? m.niCagr : m.niYoY);
+const FCOLS = {
+  ticker: { v: r => r.ticker, dir: 1 },
+  sector: { v: r => r.sector || '', dir: 1 },
+  score: { v: r => r.score, dir: -1 },
+  ...Object.fromEntries(SUBS.map(s => [s.k, { v: r => ((r.missing || []).includes(s.k) ? null : (r.sub || {})[s.k]), dir: -1 }])),
+  roe: { v: r => (r.metrics || {}).roe, dir: -1 },
+  nig: { v: r => nigOf(r.metrics || {}), dir: -1 },
+  per: { v: r => (r.metrics || {}).per, dir: 1 },
+  pbv: { v: r => (r.metrics || {}).pbv, dir: 1 },
+  warn: { v: r => warnFlags(r).length, dir: -1 },
+};
+const xTxt = v => (v == null || !Number.isFinite(v) ? '–' : `${v >= 100 ? v.toFixed(0) : v.toFixed(1).replace('.', ',')}x`);
+function subCell(v, miss) {
+  if (miss || v == null) return '<td class="r"><span class="muted">–</span></td>';
+  const bc = bandCls(F.bandOf(v).key);
+  return `<td class="r"><span class="t-sub ${bc}"><b class="mono">${esc(v)}</b><i><i style="width:${Math.max(2, Math.min(100, Number(v) || 0))}%"></i></i></span></td>`;
+}
+function fundTableHTML(shown, errRows, pending) {
+  const f = state.fund;
+  const col = FCOLS[f.sort] ? f.sort : 'score';
+  const base = shown.slice().sort((a, b) => b.score - a.score || a.ticker.localeCompare(b.ticker)); // tie-break: skor
+  const sorted = sortBy(base, FCOLS[col].v, f.dir || -1);
+  const cur = { k: col, dir: f.dir || -1 };
+  const th = (l, k, c = '') => sortTh(l, k, cur, 'data-ft', c);
+  const rows = sorted.map((r, i) => {
+    const m = r.metrics || {}, t = esc(r.ticker), bc = bandCls(r.band && r.band.key);
+    const nig = nigOf(m);
+    const nigTxt = m.core <= 0 ? '<span class="neg">rugi</span>' : m.turnaround ? '<span class="muted">turnaround</span>' : nig == null ? '<span class="muted">–</span>' : `<span class="${nig >= 0 ? 'pos' : 'neg'}">${pctTxt(nig, 0)}</span>`;
+    return `<tr class="trow" tabindex="0" data-s="${t}" data-m="saham" aria-label="Peringkat ${i + 1}, ${t}, skor ${esc(r.score)}, buka chart">
+      <td class="t-rank mono">${i + 1}</td>
+      <td><div class="t-asset">${avatar(r.ticker, 'sm')}<div class="t-id"><b>${t}</b><span>${esc(r.name || '')}</span></div></div></td>
+      <td><span class="mk sec">${esc(r.sector)}</span></td>
+      <td class="r"><span class="fscore ${bc}" title="${esc(r.band && r.band.label)}">${esc(r.score)}</span></td>
+      ${SUBS.map(s => subCell((r.sub || {})[s.k], (r.missing || []).includes(s.k))).join('')}
+      <td class="r mono">${m.roeNA ? '<span class="muted">n/a</span>' : m.roe == null ? '<span class="muted">–</span>' : esc((m.roe * 100).toFixed(1).replace('.', ',') + '%')}</td>
+      <td class="r mono">${nigTxt}</td>
+      <td class="r mono">${m.loss ? '<span class="neg">rugi</span>' : esc(xTxt(m.per))}</td>
+      <td class="r mono">${esc(xTxt(m.pbv))}</td>
+      <td class="c">${warnChip(r) || '<span class="muted">–</span>'}</td>
+    </tr>`;
+  }).join('');
+  const errs = errRows.map(r => `<tr class="trow" tabindex="0" data-s="${esc(r.ticker)}" data-m="saham" aria-label="${esc(r.ticker)}, gagal dimuat">
+      <td class="t-rank mono">–</td><td><div class="t-asset">${avatar(r.ticker, 'sm')}<div class="t-id"><b>${esc(r.ticker)}</b><span class="neg">${esc(r.error)}</span></div></div></td>
+      <td><span class="mk sec">${esc(F.sectorOf(r.ticker))}</span></td><td class="r"><span class="badge ERR">ERROR</span></td><td colspan="9"></td></tr>`).join('');
+  const skel = pending.slice(0, 6).map(t => `<tr><td class="t-rank mono">·</td><td><div class="t-asset">${avatar(t, 'sm')}<div class="t-id"><b>${esc(t)}</b><span><span class="skel" style="width:120px"></span></span></div></div></td><td colspan="11"><span class="skel" style="width:60%"></span></td></tr>`).join('');
+  return `<div class="tscroll"><table class="dtable ftable">
+    <thead><tr><th scope="col" class="t-rank">#</th>${th('Saham', 'ticker')}${th('Sektor', 'sector')}${th('Skor', 'score', 'r')}${SUBS.map(s => th(s.name, s.k, 'r')).join('')}${th('ROE', 'roe', 'r')}${th('Laba inti tumbuh', 'nig', 'r')}${th('PER', 'per', 'r')}${th('PBV', 'pbv', 'r')}${th('⚠', 'warn', 'c')}</tr></thead>
+    <tbody>${rows}${skel}${errs}</tbody></table></div>
+    ${pending.length > 6 ? `<p class="note" style="text-align:center">+${pending.length - 6} saham lagi sedang dimuat…</p>` : ''}`;
+}
+
 function fundClick(e) {
   const f = state.fund;
+  const ft = e.target.closest('[data-ft]');
+  if (ft) {
+    const k = ft.dataset.ft;
+    if (!FCOLS[k]) return;
+    if (f.sort === k) f.dir = -(f.dir || -1); else { f.sort = k; f.dir = FCOLS[k].dir; }
+    return renderFund();
+  }
   const ff = e.target.closest('[data-ff]');
   if (ff) { f.filter = ff.dataset.ff; return renderFund(); }
   const fs = e.target.closest('[data-fs]');
-  if (fs) { f.sort = FSORTS.some(s => s.v === fs.dataset.fs) ? fs.dataset.fs : 'score'; return renderFund(); }
+  if (fs) { f.sort = FSORTS.some(s => s.v === fs.dataset.fs) ? fs.dataset.fs : 'score'; f.dir = -1; return renderFund(); }
   if (e.target.closest('[data-fq="reload"]')) { startFund(true); return renderFund(); }
-  const row = e.target.closest('.frow[data-s]');
+  const row = e.target.closest('.frow[data-s], .trow[data-s]');
   if (row) openSymbol(row.dataset.s, 'saham');
 }
 
@@ -970,7 +1200,7 @@ function renderChart() {
       ${chartHead('Chart', 'Pilih aset', false)}
       <div class="hero plain">
         <div class="hero-k">Chart & analisa</div>
-        <p class="note" style="margin-top:6px">Ketuk salah satu aset untuk melihat sinyal, chart, rencana posisi, dan hasil backtest.</p>
+        <p class="note" style="margin-top:6px">Pilih salah satu aset untuk melihat sinyal, chart, rencana posisi, dan hasil backtest.</p>
       </div>
       ${state.watchlist.length
         ? `<div class="picker-grid">${pickButtons('pick')}</div>`
@@ -1010,7 +1240,8 @@ function renderChart() {
 
   stopLive(); destroyCharts();
   const sub = `${esc(name || (cur.market === 'crypto' ? 'Crypto' : 'Saham'))} · ${cur.market === 'crypto' ? 'CRYPTO' : 'IDX'}`;
-  view.innerHTML = `
+  if (desk) view.innerHTML = chartDeskHTML({ cur, d, name, iv, priceHtml });
+  else view.innerHTML = `
     ${chartHead(esc(cur.symbol), sub, true)}
     <div class="seg tf" role="group" aria-label="Timeframe chart">
       ${INTERVALS.map(i => `<button type="button" data-iv="${i.v}" aria-pressed="${i.v === iv}">${i.chip}</button>`).join('')}
@@ -1024,6 +1255,61 @@ function renderChart() {
   }
   if (cur.market === 'saham') ensureFundCur(cur.symbol);
   if (cur.market === 'crypto' && d && !state.detailError) ensureHl();
+}
+
+// Chart versi desktop: kiri = header + chart tinggi, kanan (sticky) = sinyal & analisa, bawah = riwayat
+function chartDeskHTML({ cur, d, name, iv, priceHtml }) {
+  const tfBar = `<div class="seg tf" role="group" aria-label="Timeframe chart">
+      ${INTERVALS.map(i => `<button type="button" data-iv="${i.v}" aria-pressed="${i.v === iv}">${i.chip}</button>`).join('')}
+    </div>`;
+  const head = `<div class="c-head">
+      <div class="c-id">${avatar(cur.symbol)}<div class="c-title"><h1>${esc(cur.symbol)} ${mkTag(cur.market)}</h1>
+        <div class="name">${esc(name || (cur.market === 'crypto' ? 'Crypto' : 'Saham IDX'))}</div></div></div>
+      <button type="button" class="btn" data-c="switch">${ICON.dots}Ganti aset</button>
+    </div>${priceHtml}`;
+  const veil = state.detailLoading && d ? ' loading-veil' : '';
+  if (state.detailError) {
+    return `<div id="detail" class="cdesk"><div class="c-top"><div class="c-main">${head}
+      <div class="card c-tf">${tfBar}</div>
+      <div class="err-card"><b>${esc(cur.symbol)}</b>: ${esc(state.detailError)}</div>
+      <button type="button" class="pill" style="margin-top:12px" data-c="retry">${ICON.refresh}Coba lagi</button></div></div></div>`;
+  }
+  if (!d) {
+    const sk = w => `<div class="card"><span class="skel" style="width:40%;height:14px"></span><br><br><span class="skel" style="width:${w}%"></span><br><br><span class="skel" style="width:70%"></span></div>`;
+    return `<div id="detail" class="cdesk"><div class="c-top">
+      <div class="c-main">${head}<div class="card chart-card"><div class="chart-bar">${tfBar}</div><div class="c-chart-skel"></div></div></div>
+      <aside class="c-side">${sk(90)}${sk(80)}${sk(60)}</aside></div></div>`;
+  }
+  const P = detailParts(d, { tfBar });
+  return `<div id="detail" class="cdesk${veil}">
+    <div class="c-top">
+      <div class="c-main">${head}${P.chart}</div>
+      <aside class="c-side" aria-label="Sinyal dan analisa ${esc(cur.symbol)}">${P.sig}${P.gauge}${P.plan}${P.reasons}${P.fund}${P.hl}${P.backtest}</aside>
+    </div>
+    <div class="c-full">${tradesDeskHTML(d)}${P.foot}</div>
+  </div>`;
+}
+
+function tradesDeskHTML(d) {
+  const cur = d.currency, iv = isIntraday(d.interval);
+  const trades = (d.trades || []).slice().reverse();
+  const shown = state.showAllTrades ? trades : trades.slice(0, 12);
+  const body = shown.map((t, i) => `<tr>
+      <td class="t-rank mono">${trades.length - i}</td>
+      <td>${esc(date(t.entry_time, iv))}</td>
+      <td class="r mono"><b>${fmt(t.entry_price, cur)}</b></td>
+      <td>${t.open ? '<span class="muted">Belum jual · sekarang</span>' : esc(date(t.exit_time, iv))}</td>
+      <td class="r mono"><b>${fmt(t.exit_price, cur)}</b></td>
+      <td class="r">${chgPill(t.return_pct)}</td>
+      <td class="r">${t.open ? '<span class="badge HOLD">PEGANG</span>' : `<span class="badge ${Number(t.return_pct) >= 0 ? 'BUY' : 'SELL'}">${Number(t.return_pct) >= 0 ? 'UNTUNG' : 'RUGI'}</span>`}</td>
+    </tr>`).join('');
+  return `<div class="card">
+    <div class="section-h first"><h2>Riwayat sinyal BUY → SELL <span class="count">${trades.length}</span></h2><span class="hint">${esc((STRATEGIES[(d.params || {}).strategy] || {}).name || '')} · ${esc(ivName(d.interval))}</span></div>
+    ${trades.length ? `<div class="tscroll"><table class="dtable htable" aria-label="Riwayat sinyal">
+      <thead><tr><th scope="col" class="t-rank">#</th><th scope="col">Tanggal beli</th><th scope="col" class="r">Harga beli</th><th scope="col">Tanggal jual</th><th scope="col" class="r">Harga jual</th><th scope="col" class="r">Hasil</th><th scope="col" class="r">Status</th></tr></thead>
+      <tbody>${body}</tbody></table></div>` : '<div class="empty">Belum ada trade di periode ini.</div>'}
+    ${trades.length > shown.length ? `<button type="button" class="pill ghost more-trades" data-c="alltrades">Tampilkan semua (${trades.length})</button>` : ''}
+  </div>`;
 }
 
 // ---- kartu Posisi Trader Top Hyperliquid (crypto saja; sentimen read-only)
@@ -1052,7 +1338,7 @@ function paintHl() {
   if (state.tab === 'signal') scheduleRender();
 }
 
-function detailHTML(d) {
+function detailParts(d, { tfBar = '' } = {}) {
   const cur = d.currency, p = d.plan || {}, b = d.backtest || {}, n = d.indicators_now || {};
   const params = d.params || {};
   const a = act(d.action);
@@ -1072,7 +1358,8 @@ function detailHTML(d) {
   const trades = (d.trades || []).slice().reverse();
   const shown = state.showAllTrades ? trades : trades.slice(0, 8);
 
-  return `
+  return {
+    sig: `
     <div class="sig ${a}">
       <div class="sig-top">
         <div><div class="sig-lbl">Sinyal sekarang · ${esc(ivName(d.interval))}</div>
@@ -1081,19 +1368,22 @@ function detailHTML(d) {
       </div>
       <p>${esc(d.advice)}</p>
       ${lastSig ? `<div class="last">Sinyal terakhir: <b>${esc(lastSig.type)}</b> ${esc(date(lastSig.time, iv))} @ <b class="mono">${fmt(lastSig.price, cur)}</b><br>${esc(lastSig.reason)}</div>` : ''}
-    </div>
-    ${d.market === 'saham' ? `<div id="fundCard">${fundCardHTML()}</div>` : ''}
-    ${d.market === 'crypto' ? `<div id="hlCard">${hlCard()}</div>` : ''}
-
+    </div>`,
+    fund: `
+    ${d.market === 'saham' ? `<div id="fundCard">${fundCardHTML()}</div>` : ''}`,
+    hl: `
+    ${d.market === 'crypto' ? `<div id="hlCard">${hlCard()}</div>` : ''}`,
+    gauge: `
     <div class="card">
       <div class="gauge-head"><span>Kondisi pasar (skor indikator)</span><b>${score > 0 ? '+' : ''}${esc(score)}</b></div>
       <div class="gauge-bar" role="meter" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="${score}" aria-label="Skor indikator">
         <div class="gauge-pin" style="left:${Math.max(0, Math.min(100, (score + 100) / 2))}%"></div></div>
       <div class="gauge-ticks"><span>-100 Bearish</span><span>0</span><span>Bullish +100</span></div>
-    </div>
-
+    </div>`,
+    chart: `
     <div class="card chart-card">
       <div class="chart-bar">
+        ${tfBar}
         <div class="seg mode" role="group" aria-label="Jenis chart">
           <button type="button" data-mode="line" aria-pressed="${state.settings.chartMode === 'line'}">${ICON.line}Garis</button>
           <button type="button" data-mode="candle" aria-pressed="${state.settings.chartMode === 'candle'}">${ICON.candle}Candle</button>
@@ -1109,8 +1399,8 @@ function detailHTML(d) {
       <div class="sub-label">Skor per candle (hijau bullish, merah bearish)</div>
       <div id="scoreChart"></div>
       <div class="strat-note"><b style="color:var(--text)">${esc((STRATEGIES[params.strategy] || {}).name || 'Strategi')}:</b> ${strat}${ma200Note}</div>
-    </div>
-
+    </div>`,
+    plan: `
     <div class="card">
       <h3>${holding ? 'Rencana posisi (sedang pegang)' : 'Acuan risiko — jika sinyal BUY muncul'}</h3>
       <div class="kv-grid">
@@ -1125,8 +1415,8 @@ function detailHTML(d) {
              <div class="kv"><div class="k">Target 2 (2R)</div><div class="v mono pos">${fmt(p.target_2, cur)}</div></div>`}
       </div>
       <p class="note">Pasang stop loss di aplikasi broker/exchange Anda. Aplikasi ini tidak mengeksekusi order.</p>
-    </div>
-
+    </div>`,
+    reasons: `
     <div class="card">
       <h3>Alasan</h3>
       <ul class="reasons">${(d.reasons || []).map(r => {
@@ -1134,8 +1424,8 @@ function detailHTML(d) {
         return `<li><span class="ic ${c}">${r.dir === '+' ? '▲' : r.dir === '-' ? '▼' : '•'}</span><span>${esc(r.text)}</span></li>`;
       }).join('') || '<li class="muted">Tidak ada catatan.</li>'}</ul>
       <p class="note mono" style="font-size:11.5px">RSI ${n.rsi == null ? '–' : esc(Number(n.rsi).toFixed(1))} · EMA20 ${fmt(n.ema20, cur)} · EMA50 ${fmt(n.ema50, cur)} · ATR ${fmt(n.atr, cur)}</p>
-    </div>
-
+    </div>`,
+    backtest: `
     <div class="card">
       <h3>Backtest strategi ini</h3>
       <div class="kv-grid">
@@ -1149,8 +1439,8 @@ function detailHTML(d) {
         <div class="kv"><div class="k">Terburuk</div><div class="v mono">${pct(b.worst)}</div></div>
       </div>
       <p class="note">Dari data di chart, sudah termasuk biaya ${esc(params.fee_pct)}% per transaksi, asumsi beli/jual di harga close candle sinyal. Hasil masa lalu tidak menjamin hasil ke depan.</p>
-    </div>
-
+    </div>`,
+    trades: `
     <div class="card">
       <h3>Riwayat sinyal BUY → SELL (${trades.length})</h3>
       ${trades.length ? `<div class="ttable" role="table" aria-label="Riwayat sinyal">
@@ -1163,8 +1453,25 @@ function detailHTML(d) {
         </div>`).join('')}
       </div>` : '<div class="empty">Belum ada trade di periode ini.</div>'}
       ${trades.length > shown.length ? `<button type="button" class="pill ghost more-trades" data-c="alltrades">Tampilkan semua (${trades.length})</button>` : ''}
-    </div>
-    <p class="note" style="text-align:center;padding:0 8px">Alat bantu analisa teknikal, bukan saran investasi. Data saham Yahoo Finance (tertunda ±15 menit), crypto Binance.</p>`;
+    </div>`,
+    foot: `
+    <p class="note" style="text-align:center;padding:0 8px">Alat bantu analisa teknikal, bukan saran investasi. Data saham Yahoo Finance (tertunda ±15 menit), crypto Binance.</p>`,
+  };
+}
+
+function detailHTML(d) {
+  const P = detailParts(d);
+  return `
+${P.sig}
+${P.fund}
+${P.hl}
+${P.gauge}
+${P.chart}
+${P.plan}
+${P.reasons}
+${P.backtest}
+${P.trades}
+${P.foot}`;
 }
 
 $('#view-chart').addEventListener('click', e => {
@@ -1314,7 +1621,7 @@ function drawCharts(d, keepRange = null) {
   sync(chart, sc); sync(sc, chart);
   const n = d.candles.length;
   // layar sempit: tampilkan ±90 candle terakhir, sisanya bisa digeser
-  chart.timeScale().setVisibleLogicalRange(keepRange || { from: Math.max(0, n - 90), to: n + 3 });
+  chart.timeScale().setVisibleLogicalRange(keepRange || { from: Math.max(0, n - (desk ? 180 : 90)), to: n + 3 });
   charts = [chart, sc];
   priceSeries = main; glowSeries = glow; chartMode = mode; shiftFn = sh;
 }
@@ -1377,9 +1684,10 @@ function startLive(d) {
 // ---------------------------------------------------------------- tab Lainnya
 function renderMore() {
   const st = state.settings;
-  const guideOpen = $('#guide') ? $('#guide').open : false;
+  const guideOpen = $('#guide') ? $('#guide').open : desk; // desktop: kolom bantuan langsung terbuka
   $('#view-more').innerHTML = `
     <h1 class="page-h">Lainnya</h1>
+    ${desk ? '<div class="more-grid"><div class="more-col">' : ''}
     <div class="section-h"><h2>Pengaturan analisa</h2></div>
     <div class="group">
       <div class="set">
@@ -1418,6 +1726,7 @@ function renderMore() {
       </div>
     </div>
 
+    ${desk ? '</div><div class="more-col">' : ''}
     <div class="section-h"><h2>Bantuan</h2></div>
     <div class="group">
       <details class="acc" id="guide" ${guideOpen ? 'open' : ''}>
@@ -1462,6 +1771,7 @@ function renderMore() {
         <div class="disclaimer" style="padding-top:0">AInalyzer Trading adalah alat bantu analisa teknikal & fundamental, <b>bukan saran investasi</b>. Sinyal dihitung otomatis dari indikator (EMA, RSI, ATR, Bollinger) dan bisa salah. Skor fundamental dihitung dari laporan keuangan Yahoo Finance (bisa terlambat, direvisi, atau keliru) dan tidak menjamin saham mana pun akan naik. Hasil backtest masa lalu tidak menjamin hasil ke depan. Data saham dari Yahoo Finance (bisa tertunda ±15 menit), crypto dari Binance. Keputusan dan risiko sepenuhnya di tangan Anda.</div>
       </details>
     </div>
+    ${desk ? '</div></div>' : ''}
     <div class="version">AInalyzer Trading v${VERSION} · ${state.watchlist.length} aset dipantau</div>`;
 }
 
@@ -1500,6 +1810,7 @@ function settingsChanged() {
 
 // ---------------------------------------------------------------- render & init
 function render(tab) {
+  paintSide();
   if (tab === 'signal') renderSignal();
   else if (tab === 'market') renderMarket();
   else if (tab === 'chart') renderChart();
@@ -1526,6 +1837,114 @@ for (const b of $$('.tab')) b.addEventListener('click', () => {
 });
 $('#refreshBtn').addEventListener('click', refreshAll);
 $('#scanFab').addEventListener('click', refreshAll);
+$('#sideScan').addEventListener('click', refreshAll);
+$('#sideFoot').addEventListener('click', e => { if (e.target.closest('[data-tab-go="more"]') && state.tab !== 'more') navigate('more'); });
+
+// ---------------------------------------------------------------- pencarian simbol (desktop)
+let searchHits = [], searchSel = -1;
+function searchCandidates() {
+  const out = [], seen = new Set();
+  for (const w of state.watchlist) {
+    const k = keyOf(w.symbol, w.market);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const r = rowFor(w);
+    out.push({ symbol: w.symbol, market: w.market, name: r && !r.error ? r.name : '', watched: true, r });
+  }
+  for (const t of F.UNIVERSE) {
+    const k = keyOf(t, 'saham');
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const fr = state.fund.rows.get(t);
+    out.push({ symbol: t, market: 'saham', name: fr && !fr.error ? fr.name : F.sectorOf(t), watched: false });
+  }
+  return out;
+}
+function runSearch() {
+  const inp = $('#searchIn'), box = $('#searchRes');
+  const q = inp.value.trim().toUpperCase();
+  if (!q) { closeSearch(false); return; }
+  const all = searchCandidates();
+  const score = c => (c.symbol === q ? 0 : c.symbol.startsWith(q) ? 1 : c.symbol.includes(q) ? 2 : String(c.name || '').toUpperCase().includes(q) ? 3 : 9);
+  searchHits = all.map(c => [c, score(c)]).filter(x => x[1] < 9).sort((a, b) => a[1] - b[1] || (b[0].watched - a[0].watched)).slice(0, 8).map(x => x[0]);
+  if (!all.some(c => c.symbol.startsWith(q))) { // simbol di luar daftar: tawarkan buka chart langsung
+    for (const m of ['saham', 'crypto']) if (validSym(q, m)) searchHits.push({ symbol: q, market: m, name: '', watched: false, adhoc: true });
+  }
+  searchSel = searchHits.length ? 0 : -1;
+  box.innerHTML = searchHits.length
+    ? searchHits.map((c, i) => {
+      const a = c.r && !c.r.error ? act(c.r.action) : null;
+      return `<button type="button" class="sres-i" role="option" id="sres-${i}" data-i="${i}" aria-selected="${i === searchSel}">
+        ${avatar(c.symbol, 'sm')}<span class="sres-id"><b>${esc(c.symbol)}</b><span>${c.adhoc ? `Buka chart ${c.market === 'crypto' ? 'crypto' : 'saham IDX'} (tidak ada di daftar)` : esc(c.name || '')}</span></span>
+        ${mkTag(c.market)}${a ? `<span class="badge ${a}">${a}</span>` : c.watched ? '' : '<span class="sres-tag">Universe</span>'}</button>`;
+    }).join('')
+    : '<div class="sres-empty">Tidak ada simbol yang cocok.</div>';
+  box.hidden = false;
+  inp.setAttribute('aria-expanded', 'true');
+  inp.setAttribute('aria-activedescendant', searchSel >= 0 ? 'sres-0' : '');
+}
+function closeSearch(clear = true) {
+  const inp = $('#searchIn'), box = $('#searchRes');
+  box.hidden = true; box.innerHTML = '';
+  inp.setAttribute('aria-expanded', 'false');
+  inp.removeAttribute('aria-activedescendant');
+  searchHits = []; searchSel = -1;
+  if (clear) inp.value = '';
+}
+function pickSearch(i) {
+  const c = searchHits[i];
+  if (!c) return;
+  closeSearch();
+  $('#searchIn').blur();
+  openSymbol(c.symbol, c.market);
+}
+$('#searchIn').addEventListener('input', runSearch);
+$('#searchIn').addEventListener('focus', () => { if ($('#searchIn').value.trim()) runSearch(); });
+$('#searchIn').addEventListener('keydown', e => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (!searchHits.length) return;
+    e.preventDefault();
+    searchSel = (searchSel + (e.key === 'ArrowDown' ? 1 : -1) + searchHits.length) % searchHits.length;
+    for (const b of $$('#searchRes .sres-i')) b.setAttribute('aria-selected', String(Number(b.dataset.i) === searchSel));
+    $('#searchIn').setAttribute('aria-activedescendant', 'sres-' + searchSel);
+    const cur = $('#sres-' + searchSel); if (cur) cur.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    pickSearch(searchSel >= 0 ? searchSel : 0);
+  } else if (e.key === 'Escape') {
+    e.preventDefault(); e.stopPropagation();
+    if ($('#searchIn').value) closeSearch(); else $('#searchIn').blur();
+  }
+});
+$('#searchRes').addEventListener('mousedown', e => e.preventDefault()); // jaga fokus input saat klik hasil
+$('#searchRes').addEventListener('click', e => { const b = e.target.closest('[data-i]'); if (b) pickSearch(Number(b.dataset.i)); });
+$('#searchIn').addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== $('#searchIn')) closeSearch(false); }, 120));
+
+// pintasan keyboard: "/" fokus ke pencarian (desktop), Esc menutup sheet/modal
+document.addEventListener('keydown', e => {
+  const t = e.target, typing = t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+  if (e.key === '/' && desk && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && $('#sheet').hidden) {
+    e.preventDefault();
+    $('#searchIn').focus();
+  } else if (e.key === 'Escape' && !$('#sheet').hidden) {
+    e.preventDefault();
+    closeSheet();
+  }
+});
+
+// ganti layout saat melewati 1024px (mis. jendela di-resize): render ulang ke wadah yang sesuai
+function onDeskChange(e) {
+  if (!!e.matches === desk) return;
+  desk = !!e.matches;
+  closeSearch();
+  renderMarketShell();
+  render(state.tab);
+  updateTabBadge();
+}
+if (DESK_MQ) {
+  if (DESK_MQ.addEventListener) DESK_MQ.addEventListener('change', onDeskChange);
+  else if (DESK_MQ.addListener) DESK_MQ.addListener(onDeskChange);
+}
 $('#bellBtn').addEventListener('click', () => {
   if (state.tab !== 'signal') navigate('signal');
   const sec = $('#sec-new');

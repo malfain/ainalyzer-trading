@@ -1,7 +1,7 @@
 // Tampilan "Posisi Trader Top Hyperliquid" (kartu di tab Chart + ringkasan di tab Sinyal).
 import { esc, act, fmt, LABEL } from './util.js';
-import { ICON } from './icons.js?v=1.3.0';
-import { coinFor, stance, interpret, shortAddr, validAddr, MAX_ROWS, MIN_TRADERS } from '../hyperliquid.js?v=1.3.0';
+import { ICON } from './icons.js?v=1.4.0';
+import { coinFor, stance, interpret, shortAddr, validAddr, MAX_ROWS, MIN_TRADERS } from '../hyperliquid.js?v=1.4.0';
 
 // $ ringkas: 1,2 M (miliar), 450 jt, 12 rb
 export function usd(v) {
